@@ -1,17 +1,37 @@
+import UIKit
 import SwiftUI
 import Combine
 
-// MARK: - Titik Masuk Utama Aplikasi iOS
+// MARK: - Titik Masuk Utama Aplikasi iOS (UIKit AppDelegate)
 
+@MainActor
 @main
-struct CityBuildingNusantaraApp: App {
-    @StateObject private var viewModel = GameSessionViewModel()
+final class AppDelegate: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+    private var viewModel: GameSessionViewModel?
 
-    var body: some Scene {
-        WindowGroup {
-            RootGameContainerView(viewModel: viewModel)
-                .preferredColorScheme(.dark)
-        }
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        let sessionVM = GameSessionViewModel()
+        self.viewModel = sessionVM
+
+        let rootView = RootGameContainerView(viewModel: sessionVM)
+            .preferredColorScheme(.dark)
+
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = UIHostingController(rootView: rootView)
+        window.makeKeyAndVisible()
+        self.window = window
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        return .landscape
     }
 }
 
@@ -100,7 +120,7 @@ final class GameSessionViewModel: ObservableObject {
         initialStats.budgetIDR = selectedMode == .sandbox
             ? 999_999_999_999
             : selectedDifficulty.startingBudgetIDR
-        initialStats.timeOfDayHours = 16.8 // Sore cerah menjelang senja & malam cozy
+        initialStats.timeOfDayHours = 16.8
         initialStats.dayCount = 1
         stats = initialStats
 
@@ -206,7 +226,6 @@ final class GameSessionViewModel: ObservableObject {
     }
 
     private func plantTreeOnSidewalk(at coord: GridCoord, species: TreeSpecies) {
-        // Cari ruas jalan/trotoar di titik sentuh atau 1 petak di sekitarnya
         let targetIndex = roads.firstIndex(where: { $0.coord == coord }) ??
             roads.firstIndex(where: { abs($0.coord.x - coord.x) <= 1 && abs($0.coord.z - coord.z) <= 1 })
 
@@ -424,13 +443,11 @@ final class GameSessionViewModel: ObservableObject {
         guard screenState == .inGame else { return }
         tickCounter += 1
 
-        // Progres waktu kota (1 tick = 15 menit virtual)
         stats.timeOfDayHours += 0.25
         if stats.timeOfDayHours >= 24.0 {
             stats.timeOfDayHours -= 24.0
             stats.dayCount += 1
 
-            // Siklus anggaran bulanan/harian di Real Mode
             if selectedMode == .real {
                 let netCashflow = stats.monthlyIncomeIDR - stats.monthlyExpenseIDR
                 stats.budgetIDR += netCashflow
@@ -439,7 +456,6 @@ final class GameSessionViewModel: ObservableObject {
 
         recalculateCityMetrics()
 
-        // Evaluasi demonstrasi warga, pikiran NPC, dan pengajuan izin swasta
         protests = NusantaraAISystem.shared.evaluateCitizenProtests(
             stats: stats,
             difficulty: selectedDifficulty,
@@ -495,7 +511,6 @@ final class GameSessionViewModel: ObservableObject {
             }
         }
 
-        // Update status suplai listrik & air pada setiap gedung
         let powerOK = totalPowerSupply >= totalPowerDemand
         let waterOK = totalWaterSupply >= totalWaterDemand
         for idx in structures.indices {
