@@ -1,4 +1,5 @@
-﻿import Foundation
+﻿import simd
+import Foundation
 import UIKit
 import SceneKit
 import SwiftUI
@@ -876,7 +877,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             // Mobil Sedan / MPV + Kabin Kaca + Roda + Lampu Depan/Rem
             let chassis = SCNBox(width: 0.32, height: 0.14, length: 0.58, chamferRadius: 0.04)
             let cMat = SCNMaterial()
-            cMat.diffuse.contents = [UIColor.white, UIColor.darkGray, UIColor.systemSilver, UIColor.systemRed][index % 4]
+            cMat.diffuse.contents = [UIColor.white, UIColor.darkGray, UIColor.lightGray, UIColor.systemRed][index % 4]
             chassis.materials = [cMat]
             let chNode = SCNNode(geometry: chassis)
             chNode.position.y = 0.11
@@ -949,7 +950,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    nonisolated func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         DispatchQueue.main.async { [weak self] in
             self?.stepSimulationFrame(time: time)
         }
@@ -1156,3 +1157,4 @@ struct SceneKitViewport: UIViewRepresentable {
         }
     }
 }
+
