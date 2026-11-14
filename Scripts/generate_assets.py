@@ -2,7 +2,7 @@
 """
 Rizzi Games (RG) - City Building : Nusantara Project
 iOS-Safe Asset Generator (GameAssets/) for 3D Models, PBR Textures,
-Topographic Maps, and Stereo Audio.
+Topographic Maps (RGBA 32-bit), and Stereo Audio.
 """
 
 import os
@@ -254,7 +254,8 @@ class ObjBuilder:
     def add_icosphere(self, cx: float, cy: float, cz: float, rx: float, ry: float, rz: float, rings: int = 6, sectors: int = 12):
         for r in range(rings):
             v0, v1 = r / rings, (r + 1) / rings
-            phi0, phi1 = (v0 - 0.5) * math.pi, (v1 - 0.5) * math.pi
+            phi0 = (v0 - 0.5) * math.pi * 0.96
+            phi1 = (v1 - 0.5) * math.pi * 0.96
             for s in range(sectors):
                 u0, u1 = s / sectors, (s + 1) / sectors
                 th0, th1 = u0 * 2.0 * math.pi, u1 * 2.0 * math.pi
@@ -452,7 +453,7 @@ def generate_all_models():
 
 
 def generate_nusantara_maps():
-    print("[3/4] Generating Nusantara Topographic Heightmaps...")
+    print("[3/4] Generating Nusantara Topographic Heightmaps (RGBA 32-bit)...")
     M = 512
     yy, xx = np.mgrid[0:M, 0:M].astype(np.float32) / M
     terrain_noise = fbm_noise(M, octaves=(4, 16, 64), weights=(0.55, 0.30, 0.15))
@@ -502,7 +503,9 @@ def generate_nusantara_maps():
     }
 
     for key, (hmap, meta) in maps.items():
-        Image.fromarray((hmap * 255.0).astype(np.uint8), mode="L").save(
+        gray = (hmap * 255.0).astype(np.uint8)
+        rgba = np.stack([gray, gray, gray, np.full_like(gray, 255)], axis=-1)
+        Image.fromarray(rgba, mode="RGBA").save(
             os.path.join(MAPS_DIR, f"{key}_heightmap.png")
         )
         with open(os.path.join(MAPS_DIR, f"{key}_meta.json"), "w", encoding="utf-8") as fp:
