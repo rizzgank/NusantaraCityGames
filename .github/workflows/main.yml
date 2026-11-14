@@ -2,9 +2,7 @@ name: Build City Building Nusantara IPA
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +10,6 @@ permissions:
 
 jobs:
   build-ipa:
-    name: Generate Assets & Compile iOS IPA
     runs-on: macos-latest
 
     steps:
@@ -30,49 +27,43 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate AppIcon, 3D Models, PBR Textures, Maps & Audio
+      - name: Generate 3D Models, PBR Textures, Maps & Audio
         run: |
           python3 Scripts/generate_assets.py
-          du -sh Resources Assets.xcassets
 
-      - name: Generate Xcode Project via XcodeGen
+      - name: Generate Xcode Project
         run: |
           xcodegen generate
 
-      - name: Build Release App for iPhone
+      - name: Build Unsigned iOS App
         run: |
-          xcodebuild \
-            -project CityBuildingNusantara.xcodeproj \
+          xcodebuild -project CityBuildingNusantara.xcodeproj \
             -scheme CityBuildingNusantara \
-            -sdk iphoneos \
             -configuration Release \
+            -sdk iphoneos \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            clean build
 
-      - name: Package Payload into CityBuildingNusantara.ipa
+      - name: Package into IPA
         run: |
           rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          zip -r CityBuildingNusantara.ipa Payload
+          zip -qr CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
 
-      - name: Upload IPA to GitHub Actions Artifacts
+      - name: Upload CityBuildingNusantara.ipa Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CityBuildingNusantara-IPA
           path: CityBuildingNusantara.ipa
-          retention-days: 30
 
       - name: Publish IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: "City Building : Nusantara Project v1.0.${{ github.run_number }}"
-          body: |
-            Build otomatis oleh Rizzi Games (RG) via GitHub Actions.
-            Siap di-sign & install menggunakan ESign, TrollStore, atau Filza.
           files: CityBuildingNusantara.ipa
