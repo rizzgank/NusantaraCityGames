@@ -39,7 +39,7 @@ jobs:
         run: |
           xcodegen generate
 
-      - name: Build Release App for iPhone
+      - name: Build Ad-Hoc Signed Release App for iPhone
         run: |
           xcodebuild \
             -project CityBuildingNusantara.xcodeproj \
@@ -47,18 +47,18 @@ jobs:
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_ALLOWED=YES \
             build
 
-      - name: Clean Detritus, Ad-Hoc Sign & Package IPA
+      - name: Package Payload into CityBuildingNusantara.ipa
         run: |
+          rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          xattr -cr Payload/CityBuildingNusantara.app
-          codesign --force --sign - --timestamp=none --generate-entitlement-der Payload/CityBuildingNusantara.app
+          cp -R build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
+          codesign -dvvv Payload/CityBuildingNusantara.app || true
           zip -r -y CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
 
