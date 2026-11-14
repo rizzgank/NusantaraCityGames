@@ -71,7 +71,7 @@ final class NusantaraAssetBank {
 }
 
 enum VehicleKind {
-    case motorbike, car, angkotBus, emergency
+    case motorbike, ojolMotor, car, angkotBus, constructionTruck, emergency
 }
 
 struct TrafficAgent {
@@ -82,6 +82,17 @@ struct TrafficAgent {
     var nextCoord: GridCoord
     var prevCoord: GridCoord
     var progress: Float
+    var baseSpeed: Float
+    var pauseTimer: Float
+    var weavePhase: Float
+}
+
+struct PedestrianAgent {
+    let node: SCNNode
+    var coordA: GridCoord
+    var coordB: GridCoord
+    var sideOffset: Float
+    var progress: Float
     var speed: Float
 }
 
@@ -89,7 +100,8 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     let scene = SCNScene()
     private let worldRoot = SCNNode()
     private let terrainContainer = SCNNode()
-    private let biomeContainer = SCNNode()
+    private let riverSurfaceContainer = SCNNode()
+    private let valleyNatureContainer = SCNNode()
     private let atmosphereParticlesNode = SCNNode()
     private let zonableGridContainer = SCNNode()
     private let previewContainer = SCNNode()
@@ -98,10 +110,9 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private let facilityContainer = SCNNode()
     private let utilityContainer = SCNNode()
     private let trafficContainer = SCNNode()
+    private let pedestrianContainer = SCNNode()
     private let incidentContainer = SCNNode()
 
-    // Dual-Axis Turntable Camera Rig:
-    // Pivot (XZ position + Horizontal Yaw Y) -> PitchNode (Vertical Pitch X) -> Camera (Zoom Z)
     private let cameraPivot = SCNNode()
     private let cameraPitchNode = SCNNode()
     private let cameraNode = SCNNode()
@@ -110,11 +121,14 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private let skyFillLightNode = SCNNode()
     private let ambientLightNode = SCNNode()
     private var waterMaterial: SCNMaterial?
+    private var waterNodeRef: SCNNode?
 
     private let simLock = NSLock()
     private var roadKindMap: [GridCoord: RoadKind] = [:]
     private var driveableSet: Set<GridCoord> = []
     private var agents: [TrafficAgent] = []
+    private var pedestrians: [PedestrianAgent] = []
+    private var hasActiveConstruction: Bool = false
     private var lastUpdateTime: TimeInterval = 0
     private var waterScrollPhase: Float = 0
 
@@ -146,7 +160,8 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private func setupSceneGraph() {
         scene.rootNode.addChildNode(worldRoot)
         worldRoot.addChildNode(terrainContainer)
-        worldRoot.addChildNode(biomeContainer)
+        worldRoot.addChildNode(riverSurfaceContainer)
+        worldRoot.addChildNode(valleyNatureContainer)
         worldRoot.addChildNode(atmosphereParticlesNode)
         worldRoot.addChildNode(zonableGridContainer)
         worldRoot.addChildNode(previewContainer)
@@ -155,6 +170,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         worldRoot.addChildNode(facilityContainer)
         worldRoot.addChildNode(utilityContainer)
         worldRoot.addChildNode(trafficContainer)
+        worldRoot.addChildNode(pedestrianContainer)
         worldRoot.addChildNode(incidentContainer)
 
         scene.rootNode.addChildNode(cameraPivot)
@@ -170,62 +186,56 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         cam.exposureOffset = 0.14
         cam.contrast = 1.08
         cam.saturation = 1.14
-        cam.bloomIntensity = 0.34
+        cam.bloomIntensity = 0.30
         cam.bloomThreshold = 0.88
         cam.bloomBlurRadius = 10.0
-
-        // Screen-Space Ambient Occlusion (SSAO) for Cities: Skylines architectural contact shadows!
-        cam.screenSpaceAmbientOcclusionIntensity = 1.25
-        cam.screenSpaceAmbientOcclusionRadius = 1.4
+        cam.screenSpaceAmbientOcclusionIntensity = 1.15
+        cam.screenSpaceAmbientOcclusionRadius = 1.3
         cam.screenSpaceAmbientOcclusionBias = 0.04
-        cam.screenSpaceAmbientOcclusionDepthThreshold = 0.2
-        cam.screenSpaceAmbientOcclusionNormalThreshold = 0.3
 
         cameraNode.camera = cam
         cameraNode.eulerAngles = SCNVector3Zero
         updateCameraTransform()
 
-        // 1. Ambient Hemisphere Base
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 380
-        ambient.color = UIColor(red: 0.86, green: 0.92, blue: 1.0, alpha: 1.0)
+        ambient.intensity = 410
+        ambient.color = UIColor(red: 0.88, green: 0.93, blue: 1.0, alpha: 1.0)
         ambientLightNode.light = ambient
         scene.rootNode.addChildNode(ambientLightNode)
 
-        // 2. Sky Bounce Fill Light (Illuminates shaded sides of skyscrapers naturally)
         let fill = SCNLight()
         fill.type = .directional
-        fill.intensity = 340
-        fill.color = UIColor(red: 0.68, green: 0.84, blue: 1.0, alpha: 1.0)
+        fill.intensity = 320
+        fill.color = UIColor(red: 0.72, green: 0.86, blue: 1.0, alpha: 1.0)
         fill.castsShadow = false
         skyFillLightNode.light = fill
-        skyFillLightNode.eulerAngles = SCNVector3(-Float.pi / 3.5, -Float.pi * 0.75, 0)
+        skyFillLightNode.eulerAngles = SCNVector3(-Float.pi / 3.2, -Float.pi * 0.75, 0)
         scene.rootNode.addChildNode(skyFillLightNode)
 
-        // 3. Cascaded Directional Sunlight (Fixed Shadow Distance = 85m so distant mountains NEVER darken the city!)
+        // Clean Single-Pass 4096px Shadow Map (Zero Cascade Split Artifacts, Zero Shadow Acne!)
         let sun = SCNLight()
         sun.type = .directional
-        sun.intensity = 1480
-        sun.color = UIColor(red: 1.0, green: 0.96, blue: 0.89, alpha: 1.0)
+        sun.intensity = 1440
+        sun.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1.0)
         sun.castsShadow = true
         sun.shadowMode = .deferred
-        sun.shadowSampleCount = 4
-        sun.shadowRadius = 2.4
-        sun.shadowMapSize = CGSize(width: 2048, height: 2048)
-        sun.maximumShadowDistance = 85.0
-        sun.shadowCascadeCount = 3
-        sun.shadowCascadeSplittingFactor = 0.18
-        sun.shadowBias = 0.002
-        sun.shadowColor = UIColor(red: 0.14, green: 0.18, blue: 0.28, alpha: 0.48)
+        sun.shadowSampleCount = 8
+        sun.shadowRadius = 2.8
+        sun.shadowMapSize = CGSize(width: 4096, height: 4096)
+        sun.maximumShadowDistance = 64.0
+        sun.shadowCascadeCount = 1
+        sun.shadowBias = 0.008
+        sun.orthographicScale = 44.0
+        sun.shadowColor = UIColor(red: 0.12, green: 0.16, blue: 0.24, alpha: 0.42)
         sunLightNode.light = sun
-        sunLightNode.eulerAngles = SCNVector3(-Float.pi / 2.45, Float.pi / 4.2, 0)
+        sunLightNode.eulerAngles = SCNVector3(-Float.pi / 2.2, Float.pi / 4.2, 0)
         scene.rootNode.addChildNode(sunLightNode)
 
         applyAtmosphere(shadows: true, fog: true, bloom: true)
     }
 
-    // MARK: - Sculpted Mountain Peaks & Graded River Channel
+    // MARK: - Sculpted Valley, River Channel & Distant Mountains
 
     private func fractalMountainRidge(x: Float, z: Float) -> Float {
         let r1 = 1.0 - abs(sin(x * 0.036 + cos(z * 0.032) * 1.5))
@@ -234,33 +244,37 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         return pow(max(0.0, r1 * r2), 1.45) * 1.35 + r3 * 0.25
     }
 
+    func riverCenterX(atZ z: Float) -> Float {
+        switch currentMap {
+        case .malang: return 18.0 + 2.6 * sin(z * 0.075)
+        case .surabaya: return 14.0 + 2.2 * cos(z * 0.07)
+        case .jakarta: return 12.0 + 2.4 * sin(z * 0.085)
+        }
+    }
+
     func terrainHeight(x: Float, z: Float) -> Float {
         let distFromCenter = sqrt(x * x + z * z)
-        // Mountains sit outside radius 44m so the buildable valley is completely flat & shadow-free!
-        let mountainMask = max(0.0, (distFromCenter - 44.0) / 36.0)
+        let mountainMask = max(0.0, (distFromCenter - 46.0) / 36.0)
         let mountainFactor = mountainMask * mountainMask
+
+        let rCenter = riverCenterX(atZ: z)
+        let riverChannel = exp(-pow((x - rCenter) / 5.2, 2.0)) * -0.95
 
         switch currentMap {
         case .malang:
-            let riverCenter = 18.0 + 2.4 * sin(z * 0.075)
-            let brantas = exp(-pow((x - riverCenter) / 4.8, 2.0)) * -0.82
-            let ridge = fractalMountainRidge(x: x, z: z) * 32.0 * mountainFactor
-            let arjunoNorth = max(0.0, (-z - 36.0) * 0.38) * mountainFactor
-            return brantas + ridge + arjunoNorth
+            let ridge = fractalMountainRidge(x: x, z: z) * 30.0 * mountainFactor
+            let arjunoNorth = max(0.0, (-z - 38.0) * 0.36) * mountainFactor
+            return riverChannel + ridge + arjunoNorth
 
         case .surabaya:
-            let riverCenter = 14.0 + 2.0 * cos(z * 0.07)
-            let kalimas = exp(-pow((x - riverCenter) / 4.6, 2.0)) * -0.80
-            let coastDrop = max(0.0, (x - 36.0) * -0.25)
-            let distantHills = max(0.0, (-x - 42.0) / 32.0) * fractalMountainRidge(x: x, z: z) * 18.0
-            return kalimas + coastDrop + distantHills
+            let coastDrop = max(0.0, (x - 38.0) * -0.25)
+            let distantHills = max(0.0, (-x - 44.0) / 32.0) * fractalMountainRidge(x: x, z: z) * 18.0
+            return riverChannel + coastDrop + distantHills
 
         case .jakarta:
-            let riverCenter = 12.0 + 2.2 * sin(z * 0.085)
-            let ciliwung = exp(-pow((x - riverCenter) / 4.4, 2.0)) * -0.80
-            let bayDrop = max(0.0, (-z - 36.0) * -0.25)
-            let salakHills = max(0.0, (z - 42.0) / 32.0) * fractalMountainRidge(x: x, z: z) * 22.0
-            return ciliwung + bayDrop + salakHills
+            let bayDrop = max(0.0, (-z - 38.0) * -0.25)
+            let salakHills = max(0.0, (z - 44.0) / 32.0) * fractalMountainRidge(x: x, z: z) * 20.0
+            return riverChannel + bayDrop + salakHills
         }
     }
 
@@ -270,7 +284,8 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         cameraMode = .drone
 
         terrainContainer.childNodes.forEach { $0.removeFromParentNode() }
-        biomeContainer.childNodes.forEach { $0.removeFromParentNode() }
+        riverSurfaceContainer.childNodes.forEach { $0.removeFromParentNode() }
+        valleyNatureContainer.childNodes.forEach { $0.removeFromParentNode() }
         atmosphereParticlesNode.removeAllParticleSystems()
         zonableGridContainer.childNodes.forEach { $0.removeFromParentNode() }
         previewContainer.childNodes.forEach { $0.removeFromParentNode() }
@@ -282,18 +297,20 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         simLock.lock()
         trafficContainer.childNodes.forEach { $0.removeFromParentNode() }
+        pedestrianContainer.childNodes.forEach { $0.removeFromParentNode() }
         agents.removeAll()
+        pedestrians.removeAll()
         driveableSet.removeAll()
         roadKindMap.removeAll()
         simLock.unlock()
 
         panTarget = SIMD2<Float>(0, 0)
         camPitch = 0.62
-        camDistance = showcaseDemo ? 32.0 : 36.0
+        camDistance = showcaseDemo ? 32.0 : 35.0
         updateCameraTransform()
 
-        buildHighDetailTerrainAndRiver()
-        buildLushForestSwayingGrassAndLeaves()
+        buildHighDetailTerrainAndFlowingRiver()
+        populateLivingValleyGrassAndTrees(occupied: [])
         NusantaraAssetBank.shared.playBGM(night: timePhase == .night)
 
         if showcaseDemo {
@@ -301,9 +318,9 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    private func buildHighDetailTerrainAndRiver() {
+    private func buildHighDetailTerrainAndFlowingRiver() {
         let bank = NusantaraAssetBank.shared
-        let segs = 148
+        let segs = 160
         let span: Float = 380.0
         let half = span * 0.5
 
@@ -321,10 +338,9 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 let x = -half + vx * span
                 let y = terrainHeight(x: x, z: z)
                 vertices.append(SCNVector3(x, y, z))
-                // High-density UV tiling (76x76) for crisp grass blades up close!
-                uvs.append(CGPoint(x: CGFloat(vx * 76.0), y: CGFloat(vz * 76.0)))
+                uvs.append(CGPoint(x: CGFloat(vx * 84.0), y: CGFloat(vz * 84.0)))
 
-                let eps: Float = 0.85
+                let eps: Float = 0.80
                 let hL = terrainHeight(x: x - eps, z: z)
                 let hR = terrainHeight(x: x + eps, z: z)
                 let hD = terrainHeight(x: x, z: z - eps)
@@ -336,21 +352,18 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 let nyNorm = ny / len
                 normals.append(SCNVector3(nx / len, nyNorm, nz / len))
 
-                if y < -0.36 {
-                    // Deep riverbed turquoise-slate floor
-                    colors.append(SCNVector3(0.28, 0.52, 0.56))
-                } else if y < -0.05 {
-                    // Warm golden sand & river pebble shore
-                    colors.append(SCNVector3(0.86, 0.80, 0.62))
+                if y < -0.52 {
+                    // Deep riverbed stone & turquoise silt
+                    colors.append(SCNVector3(0.24, 0.50, 0.54))
+                } else if y < -0.06 {
+                    // Sandy pebble riverbank visible beneath clear shallow water!
+                    colors.append(SCNVector3(0.88, 0.82, 0.64))
                 } else if y > 22.0 {
-                    // Alpine highland stone & mist
                     colors.append(SCNVector3(0.76, 0.80, 0.84))
                 } else if nyNorm < 0.82 || y > 9.0 {
-                    // Rocky mountain cliff strata
                     colors.append(SCNVector3(0.46, 0.48, 0.47))
                 } else {
-                    // Vibrant Cities: Skylines meadow green
-                    colors.append(SCNVector3(0.94, 1.0, 0.90))
+                    colors.append(SCNVector3(0.92, 1.0, 0.88))
                 }
             }
         }
@@ -400,91 +413,133 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         geo.materials = [mat]
         terrainContainer.addChildNode(SCNNode(geometry: geo))
 
-        // PBR Clearcoat Reflective Water with Dual Animated Ripples
+        // Flowing River Surface with Whitewater Foam & Translucent Shallows
         let waterPlane = SCNPlane(width: 520, height: 520)
         let wMat = SCNMaterial()
         wMat.lightingModel = .physicallyBased
-        wMat.diffuse.contents = UIColor(red: 0.04, green: 0.36, blue: 0.58, alpha: 0.82)
+        if let riverTex = bank.texture("river_water_albedo.png") {
+            wMat.diffuse.contents = riverTex
+            wMat.diffuse.contentsTransform = SCNMatrix4MakeScale(44, 44, 1)
+            bank.applyHDFilter(wMat.diffuse)
+        } else {
+            wMat.diffuse.contents = UIColor(red: 0.06, green: 0.42, blue: 0.62, alpha: 0.84)
+        }
         if let wNorm = bank.texture("water_normal.png") {
             wMat.normal.contents = wNorm
-            wMat.normal.contentsTransform = SCNMatrix4MakeScale(48, 48, 1)
+            wMat.normal.contentsTransform = SCNMatrix4MakeScale(52, 52, 1)
             bank.applyHDFilter(wMat.normal)
         }
-        wMat.metalness.contents = 0.15
-        wMat.roughness.contents = 0.05
+        wMat.transparency = 0.80
+        wMat.metalness.contents = 0.12
+        wMat.roughness.contents = 0.08
         wMat.clearCoat.contents = 1.0
-        wMat.clearCoatRoughness.contents = 0.04
+        wMat.clearCoatRoughness.contents = 0.05
         waterPlane.materials = [wMat]
         waterMaterial = wMat
         let waterNode = SCNNode(geometry: waterPlane)
         waterNode.eulerAngles.x = -.pi / 2
-        waterNode.position.y = -0.20
-        terrainContainer.addChildNode(waterNode)
+        waterNode.position.y = -0.22
+        waterNodeRef = waterNode
+        riverSurfaceContainer.addChildNode(waterNode)
 
-        // Natural Riverbank Boulders along the river edges
+        // Natural Riverbank Boulders & Reeds along both banks
         let rockMat = SCNMaterial()
         rockMat.lightingModel = .physicallyBased
         rockMat.diffuse.contents = UIColor(red: 0.44, green: 0.45, blue: 0.46, alpha: 1.0)
         rockMat.roughness.contents = 0.85
-        let rockGeo = SCNSphere(radius: 0.32)
+        let rockGeo = SCNSphere(radius: 0.34)
         rockGeo.materials = [rockMat]
 
-        for r in 0..<75 {
-            let rz = -34.0 + Float(r) * 0.92
-            let center = currentMap == .malang ? (18.0 + 2.4 * sin(rz * 0.075)) : (currentMap == .surabaya ? (14.0 + 2.0 * cos(rz * 0.07)) : (12.0 + 2.2 * sin(rz * 0.085)))
-            let side: Float = (r % 2 == 0) ? -3.4 : 3.4
+        for r in 0..<110 {
+            let rz = -38.0 + Float(r) * 0.70
+            let center = riverCenterX(atZ: rz)
+            let side: Float = (r % 2 == 0) ? -3.8 : 3.8
             let rx = center + side + Float(r % 3) * 0.25
             let ry = terrainHeight(x: rx, z: rz)
-            if ry > -0.22 && ry < 0.02 {
+            if ry > -0.26 && ry < 0.02 {
                 let boulder = SCNNode(geometry: rockGeo)
-                boulder.scale = SCNVector3(1.4, 0.65, 1.1)
+                boulder.scale = SCNVector3(1.5, 0.62, 1.15)
                 boulder.position = SCNVector3(rx, ry + 0.05, rz)
-                biomeContainer.addChildNode(boulder)
+                terrainContainer.addChildNode(boulder)
             }
         }
     }
 
-    private func buildLushForestSwayingGrassAndLeaves() {
-        // 1. Lush Forest Ring (340 trees outside the central buildable zone)
-        for i in 0..<340 {
-            let angle = Float(i) * 0.6180339 * 2.0 * .pi
-            let dist = 41.0 + Float(i % 44) * 1.45
-            let tx = cos(angle) * dist
-            let tz = sin(angle) * dist
-            let ty = terrainHeight(x: tx, z: tz)
-            if ty > 0.02 && ty < 13.0 {
-                let species = currentMap == .malang ? (i % 2 == 0 ? 1 : 0) : (i % 3)
-                let tree = makeAlphaFoliageTree(species: species)
-                let s = Float(0.88 + Double(i % 6) * 0.16)
-                tree.scale = SCNVector3(s, s, s)
-                tree.position = SCNVector3(tx, ty, tz)
-                biomeContainer.addChildNode(tree)
+    // MARK: - Valley-Wide 3D Grass Tufts, Tropical Trees & Falling Leaves
+
+    private func populateLivingValleyGrassAndTrees(occupied: Set<GridCoord>) {
+        valleyNatureContainer.childNodes.forEach { $0.removeFromParentNode() }
+        let bank = NusantaraAssetBank.shared
+
+        // 1. Crossed 3D Meadow Grass Tufts across the ENTIRE buildable valley & foothills!
+        let tuftMat = SCNMaterial()
+        tuftMat.lightingModel = .physicallyBased
+        tuftMat.diffuse.contents = bank.texture("grass_tuft_cutout.png") ?? UIColor(red: 0.22, green: 0.62, blue: 0.22, alpha: 1.0)
+        bank.applyHDFilter(tuftMat.diffuse, repeatTile: false)
+        tuftMat.isDoubleSided = true
+        tuftMat.transparencyMode = .aOne
+        tuftMat.writesToDepthBuffer = true
+
+        let cardA = SCNPlane(width: 0.68, height: 0.46)
+        cardA.materials = [tuftMat]
+        let cardB = SCNPlane(width: 0.68, height: 0.46)
+        cardB.materials = [tuftMat]
+
+        for g in 0..<520 {
+            let gx = Float((g * 37) % 76 - 38) + Float(g % 5) * 0.18
+            let gz = Float((g * 53) % 76 - 38) + Float((g + 2) % 5) * 0.18
+            let coord = GridCoord(x: Int(round(gx / tileSize)), z: Int(round(gz / tileSize)))
+            if occupied.contains(coord) { continue }
+
+            let gy = terrainHeight(x: gx, z: gz)
+            if gy > -0.02 && gy < 6.5 {
+                let clump = SCNNode()
+                let n1 = SCNNode(geometry: cardA)
+                let n2 = SCNNode(geometry: cardB)
+                n2.eulerAngles.y = .pi / 2.0
+                clump.addChildNode(n1)
+                clump.addChildNode(n2)
+                clump.position = SCNVector3(gx, gy + 0.20, gz)
+                clump.eulerAngles.y = Float(g) * 0.7
+
+                if g % 2 == 0 {
+                    let swayA = SCNAction.rotateTo(x: 0.14, y: CGFloat(clump.eulerAngles.y), z: 0.12, duration: 1.5 + Double(g % 4) * 0.25)
+                    let swayB = SCNAction.rotateTo(x: -0.10, y: CGFloat(clump.eulerAngles.y), z: -0.10, duration: 1.5 + Double(g % 4) * 0.25)
+                    swayA.timingMode = .easeInEaseOut
+                    swayB.timingMode = .easeInEaseOut
+                    clump.runAction(SCNAction.repeatForever(SCNAction.sequence([swayA, swayB])))
+                }
+                valleyNatureContainer.addChildNode(clump)
             }
         }
 
-        // 2. Swaying Wind-Blown Grass Tufts across meadows
-        let grassMat = SCNMaterial()
-        grassMat.lightingModel = .physicallyBased
-        grassMat.diffuse.contents = UIColor(red: 0.24, green: 0.62, blue: 0.24, alpha: 1.0)
-        grassMat.isDoubleSided = true
-        let bladeGeo = SCNPlane(width: 0.34, height: 0.26)
-        bladeGeo.materials = [grassMat]
+        // 2. Natural Tropical Trees INSIDE the valley + dense forest around the mountains
+        for t in 0..<320 {
+            let tx: Float
+            let tz: Float
+            if t < 95 {
+                // Trees dotted naturally inside the buildable valley (cleared automatically when player builds there!)
+                tx = Float((t * 43) % 68 - 34)
+                tz = Float((t * 61) % 68 - 34)
+                if abs(tx) < 7 && abs(tz) < 7 { continue }
+            } else {
+                let angle = Float(t) * 0.6180339 * 2.0 * .pi
+                let dist = 39.0 + Float(t % 42) * 1.45
+                tx = cos(angle) * dist
+                tz = sin(angle) * dist
+            }
 
-        for g in 0..<240 {
-            let gx = Float((g * 37) % 72 - 36)
-            let gz = Float((g * 53) % 72 - 36)
-            if abs(gx) < 12 && abs(gz) < 12 { continue }
-            let gy = terrainHeight(x: gx, z: gz)
-            if gy > 0.02 && gy < 4.0 {
-                let tuft = SCNNode(geometry: bladeGeo)
-                tuft.position = SCNVector3(gx, gy + 0.11, gz)
-                tuft.eulerAngles.y = Float(g) * 0.8
-                let swayLeft = SCNAction.rotateTo(x: 0.16, y: CGFloat(tuft.eulerAngles.y), z: 0.12, duration: 1.4 + Double(g % 4) * 0.25)
-                let swayRight = SCNAction.rotateTo(x: -0.10, y: CGFloat(tuft.eulerAngles.y), z: -0.10, duration: 1.4 + Double(g % 4) * 0.25)
-                swayLeft.timingMode = .easeInEaseOut
-                swayRight.timingMode = .easeInEaseOut
-                tuft.runAction(SCNAction.repeatForever(SCNAction.sequence([swayLeft, swayRight])))
-                biomeContainer.addChildNode(tuft)
+            let coord = GridCoord(x: Int(round(tx / tileSize)), z: Int(round(tz / tileSize)))
+            if occupied.contains(coord) { continue }
+
+            let ty = terrainHeight(x: tx, z: tz)
+            if ty > 0.02 && ty < 13.0 {
+                let species = currentMap == .malang ? (t % 2 == 0 ? 1 : 0) : (t % 3)
+                let tree = makeAlphaFoliageTree(species: species)
+                let s = Float(0.88 + Double(t % 5) * 0.15)
+                tree.scale = SCNVector3(s, s, s)
+                tree.position = SCNVector3(tx, ty, tz)
+                valleyNatureContainer.addChildNode(tree)
             }
         }
 
@@ -493,32 +548,35 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
     func setWeather(_ weather: CityWeather) {
         currentWeather = weather
+        // Rise river level slightly during heavy tropical rain
+        waterNodeRef?.position.y = weather == .hujanTropis ? -0.13 : -0.22
         updateWeatherParticles()
     }
 
     private func updateWeatherParticles() {
         atmosphereParticlesNode.removeAllParticleSystems()
-        atmosphereParticlesNode.position = SCNVector3(0, 14, 0)
+        atmosphereParticlesNode.position = SCNVector3(0, 12, 0)
 
+        // Falling Wind-Blown Leaves & Pink Tabebuya Petals
         let leafPS = SCNParticleSystem()
-        leafPS.birthRate = currentWeather == .anginSepoi ? 34 : 14
-        leafPS.particleLifeSpan = 9.0
-        leafPS.particleSize = 0.13
-        leafPS.particleColor = UIColor(red: 0.56, green: 0.72, blue: 0.24, alpha: 0.90)
-        leafPS.emitterShape = SCNBox(width: 75, height: 2, length: 75, chamferRadius: 0)
+        leafPS.birthRate = currentWeather == .anginSepoi ? 42 : 18
+        leafPS.particleLifeSpan = 8.5
+        leafPS.particleSize = 0.14
+        leafPS.particleColor = UIColor(red: 0.62, green: 0.74, blue: 0.24, alpha: 0.92)
+        leafPS.emitterShape = SCNBox(width: 72, height: 2, length: 72, chamferRadius: 0)
         leafPS.emittingDirection = SCNVector3(0.45, -1.0, 0.25)
-        leafPS.spreadingAngle = 32
-        leafPS.particleVelocity = currentWeather == .anginSepoi ? 2.6 : 1.4
-        leafPS.particleAngularVelocity = 1.8
+        leafPS.spreadingAngle = 35
+        leafPS.particleVelocity = currentWeather == .anginSepoi ? 2.8 : 1.5
+        leafPS.particleAngularVelocity = 2.0
         atmosphereParticlesNode.addParticleSystem(leafPS)
 
         if currentWeather == .hujanTropis {
             let rainPS = SCNParticleSystem()
-            rainPS.birthRate = 450
+            rainPS.birthRate = 480
             rainPS.particleLifeSpan = 1.6
             rainPS.particleSize = 0.045
             rainPS.particleColor = UIColor(red: 0.72, green: 0.86, blue: 1.0, alpha: 0.65)
-            rainPS.emitterShape = SCNBox(width: 75, height: 1, length: 75, chamferRadius: 0)
+            rainPS.emitterShape = SCNBox(width: 72, height: 1, length: 72, chamferRadius: 0)
             rainPS.emittingDirection = SCNVector3(0.15, -1.0, 0.05)
             rainPS.spreadingAngle = 4
             rainPS.particleVelocity = 18.0
@@ -541,10 +599,10 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         }
         demoFacs[GridCoord(x: -2, z: -2)] = FacilityTile(coord: GridCoord(x: -2, z: -2), kind: .balaiKota)
         demoFacs[GridCoord(x: 3, z: -2)] = FacilityTile(coord: GridCoord(x: 3, z: -2), kind: .universitas)
-        demoPlots[GridCoord(x: -3, z: 1)] = ZonedPlot(coord: GridCoord(x: -3, z: 1), kind: .residentialLow, buildingLevel: 4, residents: 5, maxResidents: 6)
-        demoPlots[GridCoord(x: -2, z: 1)] = ZonedPlot(coord: GridCoord(x: -2, z: 1), kind: .residentialHigh, buildingLevel: 5, residents: 22, maxResidents: 24)
-        demoPlots[GridCoord(x: 2, z: 1)] = ZonedPlot(coord: GridCoord(x: 2, z: 1), kind: .commercial, buildingLevel: 2, residents: 4, maxResidents: 4, forcedBrandSkin: 1)
-        demoPlots[GridCoord(x: 4, z: 1)] = ZonedPlot(coord: GridCoord(x: 4, z: 1), kind: .commercial, buildingLevel: 4, residents: 6, maxResidents: 6)
+        demoPlots[GridCoord(x: -3, z: 1)] = ZonedPlot(coord: GridCoord(x: -3, z: 1), kind: .residentialLow, buildingLevel: 6, residents: 5, maxResidents: 6)
+        demoPlots[GridCoord(x: -2, z: 1)] = ZonedPlot(coord: GridCoord(x: -2, z: 1), kind: .residentialHigh, buildingLevel: 7, residents: 22, maxResidents: 24)
+        demoPlots[GridCoord(x: 2, z: 1)] = ZonedPlot(coord: GridCoord(x: 2, z: 1), kind: .commercial, buildingLevel: 4, residents: 4, maxResidents: 4, forcedBrandSkin: 1)
+        demoPlots[GridCoord(x: 4, z: 1)] = ZonedPlot(coord: GridCoord(x: 4, z: 1), kind: .commercial, buildingLevel: 6, residents: 6, maxResidents: 6)
 
         syncWorld(roads: demoRoads, plots: demoPlots, facilities: demoFacs, utilities: [:], showZonableGrid: false)
     }
@@ -556,6 +614,15 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         utilities: [GridCoord: UtilityTile],
         showZonableGrid: Bool
     ) {
+        var occupied = Set<GridCoord>()
+        roads.keys.forEach { occupied.insert($0) }
+        plots.keys.forEach { occupied.insert($0) }
+        facilities.keys.forEach { occupied.insert($0) }
+        utilities.keys.forEach { occupied.insert($0) }
+        populateLivingValleyGrassAndTrees(occupied: occupied)
+
+        hasActiveConstruction = plots.values.contains { $0.buildingLevel < 3 }
+
         roadContainer.childNodes.forEach { $0.removeFromParentNode() }
         for (_, tile) in roads {
             let n = roads[GridCoord(x: tile.coord.x, z: tile.coord.z - 1)] != nil
@@ -617,7 +684,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         }
 
         let driveRoads = roads.filter { $0.value.kind.isDriveable }
-        rebuildConnectedTrafficPool(driveRoads: driveRoads)
+        rebuildConnectedTrafficAndPedestrians(driveRoads: driveRoads)
     }
 
     func updateSelectionPreview(coords: [GridCoord], isValid: Bool, tint: UIColor) {
@@ -694,7 +761,19 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         incidentContainer.addChildNode(node)
     }
 
-    // MARK: - Next-Gen PBR Architectural Buildings, Bridges & Roads
+    // MARK: - Grounded Contact Shadows, Staged Construction & PBR Architecture
+
+    private func makeContactShadowPlane(width: CGFloat, length: CGFloat) -> SCNNode {
+        let p = SCNPlane(width: width, height: length)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = UIColor(red: 0.04, green: 0.06, blue: 0.08, alpha: 0.44)
+        mat.writesToDepthBuffer = false
+        p.materials = [mat]
+        let n = SCNNode(geometry: p)
+        n.eulerAngles.x = -.pi / 2
+        n.position.y = 0.008
+        return n
+    }
 
     private func makeRoofSlabMaterial() -> SCNMaterial {
         let mat = SCNMaterial()
@@ -741,8 +820,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
     private func addRooftopDetails(to parent: SCNNode, width: CGFloat, depth: CGFloat, topY: Float, tallBeacon: Bool) {
         let concreteMat = makeRoofSlabMaterial()
-
-        // Perimeter Parapet Wall (4 edges)
         let pThick: CGFloat = 0.07
         let pHeight: CGFloat = 0.14
         let frontBack = SCNBox(width: width, height: pHeight, length: pThick, chamferRadius: 0.01)
@@ -756,7 +833,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         let n4 = SCNNode(geometry: leftRight); n4.position = SCNVector3(-Float(width * 0.5 - pThick * 0.5), topY + 0.07, 0)
         parent.addChildNode(n1); parent.addChildNode(n2); parent.addChildNode(n3); parent.addChildNode(n4)
 
-        // Elevator Penthouse & HVAC Units
         let pent = SCNBox(width: width * 0.36, height: 0.28, length: depth * 0.34, chamferRadius: 0.02)
         pent.materials = [concreteMat]
         let pNode = SCNNode(geometry: pent)
@@ -795,6 +871,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private func makeAlphaFoliageTree(species: Int) -> SCNNode {
         let tree = SCNNode()
         let bank = NusantaraAssetBank.shared
+        tree.addChildNode(makeContactShadowPlane(width: 0.92, length: 0.92))
 
         let trunk = SCNCylinder(radius: 0.052, height: 0.62)
         let tMat = SCNMaterial()
@@ -845,12 +922,11 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         let bank = NusantaraAssetBank.shared
         let isLit = timePhase.isLitTime
         let wp = worldPosition(for: tile.coord)
-        let isOverRiver = wp.y < -0.16
+        let isOverRiver = wp.y < -0.18
 
         let roadWidth: CGFloat = tile.kind == .fourLane ? 2.85 : CGFloat(tileSize)
 
         if isOverRiver {
-            // Architectural Arched River Bridge Piers & Side Parapets
             let bridgeMat = makeRoofSlabMaterial()
             let pier = SCNCylinder(radius: 0.22, height: 1.1)
             pier.materials = [bridgeMat]
@@ -878,7 +954,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             let pNode = SCNNode(geometry: paving)
             pNode.position.y = 0.022
             holder.addChildNode(pNode)
-
             holder.addChildNode(makeAlphaFoliageTree(species: 0))
             return holder
         }
@@ -901,7 +976,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             aMat.normal.contents = norm
             bank.applyHDFilter(aMat.normal)
         }
-        aMat.roughness.contents = 0.78
+        aMat.roughness.contents = currentWeather == .hujanTropis ? 0.18 : 0.78
         asphalt.materials = [aMat]
         let aNode = SCNNode(geometry: asphalt)
         aNode.position.y = deckY
@@ -936,10 +1011,25 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             mNode.position.y = deckY + 0.56
             holder.addChildNode(mNode)
 
-            let blossom = makeAlphaFoliageTree(species: 2)
-            blossom.scale = SCNVector3(0.65, 0.65, 0.65)
-            blossom.position = SCNVector3(0.38, deckY + 0.08, 0.35)
-            holder.addChildNode(blossom)
+            // Night Angkringan Cart beside Alun-Alun Roundabout!
+            if isLit {
+                let cart = SCNBox(width: 0.42, height: 0.26, length: 0.22, chamferRadius: 0.02)
+                let cMat = SCNMaterial()
+                cMat.diffuse.contents = UIColor(red: 0.55, green: 0.34, blue: 0.16, alpha: 1.0)
+                cart.materials = [cMat]
+                let cartNode = SCNNode(geometry: cart)
+                cartNode.position = SCNVector3(-0.36, deckY + 0.22, 0.36)
+                holder.addChildNode(cartNode)
+
+                let lantern = SCNSphere(radius: 0.05)
+                let lMat = SCNMaterial()
+                lMat.diffuse.contents = UIColor.orange
+                lMat.emission.contents = UIColor(red: 1.0, green: 0.74, blue: 0.24, alpha: 1.0)
+                lantern.materials = [lMat]
+                let lNode = SCNNode(geometry: lantern)
+                lNode.position = SCNVector3(-0.36, deckY + 0.45, 0.36)
+                holder.addChildNode(lNode)
+            }
         } else if (abs(tile.coord.x) + abs(tile.coord.z)) % 2 == 0 {
             let poleOffset = Float(roadWidth) * 0.46
             let pole = SCNCylinder(radius: 0.022, height: 0.92)
@@ -970,7 +1060,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         let w = CGFloat(tileSize * 0.95)
         let bank = NusantaraAssetBank.shared
 
-        // Flush Ground Lot Pad (Blends naturally with terrain—no ugly grey Lego box!)
         let base = SCNBox(width: w, height: 0.025, length: w, chamferRadius: 0)
         let baseMat = SCNMaterial()
         baseMat.lightingModel = .physicallyBased
@@ -1001,23 +1090,97 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             return holder
         }
 
+        // Realistic Multi-Stage Construction Phases (0 -> 1 -> 2 before completed building >= 3!)
         if plot.buildingLevel == 0 {
-            let scaffold = SCNBox(width: 1.15, height: 0.72, length: 1.15, chamferRadius: 0)
-            let sMat = SCNMaterial()
-            sMat.diffuse.contents = UIColor(red: 0.82, green: 0.66, blue: 0.28, alpha: 0.72)
-            scaffold.materials = [sMat]
-            let sNode = SCNNode(geometry: scaffold)
-            sNode.position.y = 0.38
+            // Stage 0: Patok Tanah Kayu & Tumpukan Bata/Pasir
+            let sandMound = SCNSphere(radius: 0.28)
+            let sMat = SCNMaterial(); sMat.diffuse.contents = UIColor(red: 0.68, green: 0.62, blue: 0.50, alpha: 1.0)
+            sandMound.materials = [sMat]
+            let sNode = SCNNode(geometry: sandMound)
+            sNode.scale = SCNVector3(1.2, 0.45, 1.0)
+            sNode.position = SCNVector3(-0.32, 0.08, 0.24)
             holder.addChildNode(sNode)
+
+            let brickStack = SCNBox(width: 0.36, height: 0.22, length: 0.26, chamferRadius: 0.01)
+            let bMat = SCNMaterial(); bMat.diffuse.contents = bank.texture("brick_construction_albedo.png") ?? UIColor.brown
+            brickStack.materials = [bMat]
+            let bNode = SCNNode(geometry: brickStack)
+            bNode.position = SCNVector3(0.32, 0.12, -0.22)
+            holder.addChildNode(bNode)
+
+            for sx in [-0.55, 0.55] as [Float] {
+                for sz in [-0.55, 0.55] as [Float] {
+                    let stake = SCNCylinder(radius: 0.025, height: 0.36)
+                    let stMat = SCNMaterial(); stMat.diffuse.contents = UIColor.systemOrange
+                    stake.materials = [stMat]
+                    let stNode = SCNNode(geometry: stake)
+                    stNode.position = SCNVector3(sx, 0.18, sz)
+                    holder.addChildNode(stNode)
+                }
+            }
             return holder
         }
 
+        if plot.buildingLevel == 1 {
+            // Stage 1: Pondasi Batu Kali & Kolom Beton Awal
+            let foundation = SCNBox(width: 1.12, height: 0.20, length: 1.08, chamferRadius: 0.01)
+            let fMat = SCNMaterial(); fMat.diffuse.contents = UIColor(red: 0.46, green: 0.47, blue: 0.49, alpha: 1.0)
+            foundation.materials = [fMat]
+            let fNode = SCNNode(geometry: foundation)
+            fNode.position.y = 0.11
+            holder.addChildNode(fNode)
+
+            for px in [-0.46, 0.46] as [Float] {
+                for pz in [-0.44, 0.44] as [Float] {
+                    let col = SCNBox(width: 0.08, height: 0.56, length: 0.08, chamferRadius: 0)
+                    col.materials = [fMat]
+                    let cNode = SCNNode(geometry: col)
+                    cNode.position = SCNVector3(px, 0.38, pz)
+                    holder.addChildNode(cNode)
+                }
+            }
+            return holder
+        }
+
+        if plot.buildingLevel == 2 {
+            // Stage 2: Dinding Bata Merah & Perancah Bambu (Scaffolding)
+            let brickWall = SCNBox(width: 1.08, height: 0.68, length: 1.04, chamferRadius: 0.01)
+            let bMat = SCNMaterial()
+            bMat.lightingModel = .physicallyBased
+            bMat.diffuse.contents = bank.texture("brick_construction_albedo.png") ?? UIColor(red: 0.68, green: 0.32, blue: 0.22, alpha: 1.0)
+            bank.applyHDFilter(bMat.diffuse)
+            brickWall.materials = [bMat]
+            let wNode = SCNNode(geometry: brickWall)
+            wNode.position.y = 0.36
+            holder.addChildNode(wNode)
+
+            let bambooMat = SCNMaterial()
+            bambooMat.diffuse.contents = UIColor(red: 0.76, green: 0.64, blue: 0.28, alpha: 1.0)
+            for bx in [-0.62, 0.62] as [Float] {
+                let pole = SCNCylinder(radius: 0.022, height: 0.94)
+                pole.materials = [bambooMat]
+                let pNode = SCNNode(geometry: pole)
+                pNode.position = SCNVector3(bx, 0.47, 0.58)
+                holder.addChildNode(pNode)
+            }
+            let crossBeam = SCNBox(width: 1.32, height: 0.03, length: 0.04, chamferRadius: 0)
+            crossBeam.materials = [bambooMat]
+            let cbNode = SCNNode(geometry: crossBeam)
+            cbNode.position = SCNVector3(0, 0.62, 0.58)
+            holder.addChildNode(cbNode)
+            return holder
+        }
+
+        // Completed Architectural Levels (level >= 3 maps to Building Tier 1..5)
+        let tier = max(1, plot.buildingLevel - 2)
         let hash = abs(plot.coord.x * 31 + plot.coord.z * 17) % 3
         let isLit = timePhase.isLitTime && plot.hasPower && !plot.isAbandoned
 
+        holder.addChildNode(makeContactShadowPlane(width: 1.48, length: 1.44))
+
         switch plot.kind {
         case .residentialLow:
-            let isTwoStory = plot.buildingLevel >= 3
+            let isTwoStory = tier >= 3
             let floors: CGFloat = isTwoStory ? 1.36 : 0.72
             let body = SCNBox(width: 1.08, height: floors, length: 1.04, chamferRadius: 0.02)
             let mat = SCNMaterial()
@@ -1039,7 +1202,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             bNode.position.y = Float(floors * 0.5) + 0.025
             holder.addChildNode(bNode)
 
-            // Front Veranda Canopy & Pillars
             let trimMat = SCNMaterial()
             trimMat.lightingModel = .physicallyBased
             trimMat.diffuse.contents = UIColor(red: 0.92, green: 0.90, blue: 0.86, alpha: 1.0)
@@ -1065,7 +1227,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             fenceNode.position = SCNVector3(0, 0.12, 0.88)
             holder.addChildNode(fenceNode)
 
-            // Overhanging Terracotta Roof with Normal-Mapped Tiles
             let roof = SCNPyramid(width: 1.32, height: 0.48, length: 1.28)
             let rMat = SCNMaterial()
             rMat.lightingModel = .physicallyBased
@@ -1085,15 +1246,13 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             let roofMat = makeRoofSlabMaterial()
             let glassMat = makeSkyscraperTowerMaterial(isLit: isLit, isAbandoned: plot.isAbandoned)
 
-            // Ground Lobby Podium
             let podium = SCNBox(width: 1.46, height: 0.42, length: 1.46, chamferRadius: 0.02)
-            podium.materials = [roofMat, roofMat, roofMat, roofMat, roofMat, roofMat]
+            podium.materials = [roofMat]
             let podNode = SCNNode(geometry: podium)
             podNode.position.y = 0.23
             holder.addChildNode(podNode)
 
-            // Main Tower Shaft (4 glass walls + concrete roof cap!)
-            let shaftH = 1.15 + CGFloat(plot.buildingLevel) * 0.52
+            let shaftH = 1.15 + CGFloat(tier) * 0.52
             let tower = SCNBox(width: 1.32, height: shaftH, length: 1.32, chamferRadius: 0.03)
             tower.materials = [glassMat, glassMat, glassMat, glassMat, roofMat, roofMat]
             let tNode = SCNNode(geometry: tower)
@@ -1101,11 +1260,11 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             tNode.position.y = Float(0.44 + shaftH * 0.5)
             holder.addChildNode(tNode)
 
-            addRooftopDetails(to: holder, width: 1.32, depth: 1.32, topY: topY, tallBeacon: plot.buildingLevel >= 4)
+            addRooftopDetails(to: holder, width: 1.32, depth: 1.32, topY: topY, tallBeacon: tier >= 4)
 
         case .commercial:
             let roofMat = makeRoofSlabMaterial()
-            if plot.forcedBrandSkin == 1 || (plot.forcedBrandSkin == 0 && plot.buildingLevel <= 2 && hash == 0) {
+            if plot.forcedBrandSkin == 1 || (plot.forcedBrandSkin == 0 && tier <= 2 && hash == 0) {
                 let shop = SCNBox(width: 1.46, height: 0.94, length: 1.28, chamferRadius: 0.02)
                 let sMat = SCNMaterial()
                 sMat.lightingModel = .physicallyBased
@@ -1118,7 +1277,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 sNode.position.y = 0.49
                 holder.addChildNode(sNode)
                 addRooftopDetails(to: holder, width: 1.46, depth: 1.28, topY: 0.96, tallBeacon: false)
-            } else if plot.forcedBrandSkin == 2 || (plot.forcedBrandSkin == 0 && plot.buildingLevel <= 2 && hash == 1) {
+            } else if plot.forcedBrandSkin == 2 || (plot.forcedBrandSkin == 0 && tier <= 2 && hash == 1) {
                 let shop = SCNBox(width: 1.46, height: 0.94, length: 1.28, chamferRadius: 0.02)
                 let sMat = SCNMaterial()
                 sMat.lightingModel = .physicallyBased
@@ -1132,7 +1291,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 holder.addChildNode(sNode)
                 addRooftopDetails(to: holder, width: 1.46, depth: 1.28, topY: 0.96, tallBeacon: false)
             } else {
-                // Multi-Tiered Glass Curtain-Wall Office Skyscraper
                 let glassMat = makeSkyscraperTowerMaterial(isLit: isLit, isAbandoned: plot.isAbandoned)
                 let podium = SCNBox(width: 1.48, height: 0.48, length: 1.48, chamferRadius: 0.02)
                 podium.materials = [roofMat]
@@ -1140,14 +1298,14 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 podNode.position.y = 0.26
                 holder.addChildNode(podNode)
 
-                let lowerH = 1.15 + CGFloat(plot.buildingLevel) * 0.46
+                let lowerH = 1.15 + CGFloat(tier) * 0.46
                 let lowerTower = SCNBox(width: 1.34, height: lowerH, length: 1.34, chamferRadius: 0.03)
                 lowerTower.materials = [glassMat, glassMat, glassMat, glassMat, roofMat, roofMat]
                 let ltNode = SCNNode(geometry: lowerTower)
                 ltNode.position.y = Float(0.50 + lowerH * 0.5)
                 holder.addChildNode(ltNode)
 
-                let upperH = 0.65 + CGFloat(plot.buildingLevel) * 0.24
+                let upperH = 0.65 + CGFloat(tier) * 0.24
                 let upperTower = SCNBox(width: 1.02, height: upperH, length: 1.02, chamferRadius: 0.03)
                 upperTower.materials = [glassMat, glassMat, glassMat, glassMat, roofMat, roofMat]
                 let utNode = SCNNode(geometry: upperTower)
@@ -1160,7 +1318,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         case .industrialOffice:
             let roofMat = makeRoofSlabMaterial()
-            let hallH = 0.98 + CGFloat(plot.buildingLevel) * 0.24
+            let hallH = 0.98 + CGFloat(tier) * 0.24
             let hall = SCNBox(width: 1.48, height: hallH, length: 1.24, chamferRadius: 0.02)
             let mat = SCNMaterial()
             mat.lightingModel = .physicallyBased
@@ -1336,12 +1494,14 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
     private func makeVehicleNode(kind: VehicleKind, index: Int) -> SCNNode {
         let holder = SCNNode()
+        holder.addChildNode(makeContactShadowPlane(width: kind == .motorbike || kind == .ojolMotor ? 0.24 : 0.46, length: 0.66))
+
         switch kind {
-        case .motorbike:
+        case .motorbike, .ojolMotor:
             let body = SCNBox(width: 0.12, height: 0.16, length: 0.34, chamferRadius: 0.03)
             let bMat = SCNMaterial()
             bMat.lightingModel = .physicallyBased
-            bMat.diffuse.contents = [UIColor.systemRed, UIColor.black, UIColor.systemBlue][index % 3]
+            bMat.diffuse.contents = kind == .ojolMotor ? UIColor.systemGreen : [UIColor.systemRed, UIColor.black, UIColor.systemBlue][index % 3]
             body.materials = [bMat]
             let bNode = SCNNode(geometry: body)
             bNode.position.y = 0.11
@@ -1349,7 +1509,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
             let rider = SCNSphere(radius: 0.068)
             let rMat = SCNMaterial()
-            rMat.diffuse.contents = UIColor.white
+            rMat.diffuse.contents = kind == .ojolMotor ? UIColor(red: 0.12, green: 0.72, blue: 0.32, alpha: 1.0) : UIColor.white
             rider.materials = [rMat]
             let rNode = SCNNode(geometry: rider)
             rNode.position = SCNVector3(0, 0.26, 0.02)
@@ -1390,6 +1550,21 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             bNode.position.y = 0.15
             holder.addChildNode(bNode)
 
+        case .constructionTruck:
+            let cab = SCNBox(width: 0.34, height: 0.24, length: 0.28, chamferRadius: 0.03)
+            let cMat = SCNMaterial(); cMat.diffuse.contents = UIColor.systemYellow
+            cab.materials = [cMat]
+            let cabNode = SCNNode(geometry: cab)
+            cabNode.position = SCNVector3(0, 0.14, -0.22)
+            holder.addChildNode(cabNode)
+
+            let bed = SCNBox(width: 0.36, height: 0.20, length: 0.48, chamferRadius: 0.02)
+            let bMat = SCNMaterial(); bMat.diffuse.contents = UIColor(red: 0.68, green: 0.34, blue: 0.22, alpha: 1.0)
+            bed.materials = [bMat]
+            let bedNode = SCNNode(geometry: bed)
+            bedNode.position = SCNVector3(0, 0.14, 0.14)
+            holder.addChildNode(bedNode)
+
         case .emergency:
             let amb = SCNBox(width: 0.34, height: 0.24, length: 0.66, chamferRadius: 0.04)
             let aMat = SCNMaterial()
@@ -1424,7 +1599,29 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         return holder
     }
 
-    // MARK: - Graph-Connected Left-Lane Traffic AI
+    private func makePedestrianNode(index: Int) -> SCNNode {
+        let p = SCNNode()
+        p.addChildNode(makeContactShadowPlane(width: 0.18, length: 0.18))
+
+        let torso = SCNCylinder(radius: 0.055, height: 0.22)
+        let tMat = SCNMaterial()
+        tMat.diffuse.contents = [UIColor.systemBlue, UIColor.systemRed, UIColor.systemTeal, UIColor.systemYellow][index % 4]
+        torso.materials = [tMat]
+        let tNode = SCNNode(geometry: torso)
+        tNode.position.y = 0.14
+        p.addChildNode(tNode)
+
+        let head = SCNSphere(radius: 0.048)
+        let hMat = SCNMaterial()
+        hMat.diffuse.contents = UIColor(red: 0.86, green: 0.68, blue: 0.54, alpha: 1.0)
+        head.materials = [hMat]
+        let hNode = SCNNode(geometry: head)
+        hNode.position.y = 0.29
+        p.addChildNode(hNode)
+        return p
+    }
+
+    // MARK: - Realistic Indonesian Traffic AI (Selap-Selip Motor, Ngetem Angkot, Truk Proyek, Pejalan Kaki)
 
     private func connectedNeighbors(of c: GridCoord, in set: Set<GridCoord>) -> [GridCoord] {
         let candidates = [
@@ -1436,17 +1633,23 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         return candidates.filter { set.contains($0) }
     }
 
-    private func rebuildConnectedTrafficPool(driveRoads: [GridCoord: RoadTile]) {
+    private func rebuildConnectedTrafficAndPedestrians(driveRoads: [GridCoord: RoadTile]) {
         simLock.lock()
         trafficContainer.childNodes.forEach { $0.removeFromParentNode() }
+        pedestrianContainer.childNodes.forEach { $0.removeFromParentNode() }
         agents.removeAll()
+        pedestrians.removeAll()
         roadKindMap = driveRoads.mapValues { $0.kind }
         driveableSet = Set(driveRoads.keys)
 
         let sortedCoords = driveableSet.sorted { ($0.x, $0.z) < ($1.x, $1.z) }
         if sortedCoords.count >= 2 {
-            let count = min(28, max(6, sortedCoords.count * 2))
-            let pattern: [VehicleKind] = [.motorbike, .car, .motorbike, .angkotBus, .car, .emergency]
+            let count = min(30, max(7, sortedCoords.count * 2))
+            var pattern: [VehicleKind] = [.ojolMotor, .car, .motorbike, .angkotBus, .car, .ojolMotor, .emergency]
+            if hasActiveConstruction {
+                pattern.insert(.constructionTruck, at: 2)
+            }
+
             for i in 0..<count {
                 let startCoord = sortedCoords[i % sortedCoords.count]
                 let nbrs = connectedNeighbors(of: startCoord, in: driveableSet)
@@ -1456,7 +1659,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 let laneSlot = i % 2
                 let node = makeVehicleNode(kind: vKind, index: i)
                 trafficContainer.addChildNode(node)
-                let spd: Float = vKind == .motorbike ? 0.56 : (vKind == .emergency ? 0.64 : 0.42)
+                let spd: Float = (vKind == .motorbike || vKind == .ojolMotor) ? 0.58 : (vKind == .emergency ? 0.66 : 0.40)
                 agents.append(TrafficAgent(
                     node: node,
                     kind: vKind,
@@ -1465,7 +1668,27 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                     nextCoord: firstNext,
                     prevCoord: startCoord,
                     progress: Float(i % 5) * 0.18,
-                    speed: spd
+                    baseSpeed: spd,
+                    pauseTimer: 0,
+                    weavePhase: Float(i) * 1.1
+                ))
+            }
+
+            // Spawn Sidewalk Pedestrians walking along connected roads
+            let pedCount = min(18, sortedCoords.count)
+            for pIdx in 0..<pedCount {
+                let cA = sortedCoords[pIdx % sortedCoords.count]
+                let nbrs = connectedNeighbors(of: cA, in: driveableSet)
+                guard let cB = nbrs.randomElement() else { continue }
+                let pNode = makePedestrianNode(index: pIdx)
+                pedestrianContainer.addChildNode(pNode)
+                pedestrians.append(PedestrianAgent(
+                    node: pNode,
+                    coordA: cA,
+                    coordB: cB,
+                    sideOffset: pIdx % 2 == 0 ? 0.86 : -0.86,
+                    progress: Float(pIdx % 4) * 0.22,
+                    speed: 0.22
                 ))
             }
         }
@@ -1477,10 +1700,15 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         let dt = Float(min(max(time - lastUpdateTime, 0.0), 0.08))
         lastUpdateTime = time
 
-        waterScrollPhase += dt * 0.036
-        var waterTransform = SCNMatrix4MakeScale(48, 48, 1)
-        waterTransform = SCNMatrix4Translate(waterTransform, waterScrollPhase, waterScrollPhase * 0.72, 0)
-        waterMaterial?.normal.contentsTransform = waterTransform
+        // Animated River Flow & Whitewater Foam
+        waterScrollPhase += dt * 0.055
+        var foamTransform = SCNMatrix4MakeScale(44, 44, 1)
+        foamTransform = SCNMatrix4Translate(foamTransform, 0, waterScrollPhase, 0)
+        waterMaterial?.diffuse.contentsTransform = foamTransform
+
+        var normTransform = SCNMatrix4MakeScale(52, 52, 1)
+        normTransform = SCNMatrix4Translate(normTransform, waterScrollPhase * 0.4, waterScrollPhase * 1.2, 0)
+        waterMaterial?.normal.contentsTransform = normTransform
 
         if showcaseActive {
             camYaw += dt * 0.14
@@ -1489,8 +1717,17 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         simLock.lock()
         if !agents.isEmpty {
+            let rushMult: Float = (timePhase == .sunset) ? 1.15 : 1.0
             for i in agents.indices {
-                agents[i].progress += dt * agents[i].speed
+                // Angkot & Ojol stop briefly at roadside to pick up/drop passengers ("Ngetem")
+                if agents[i].pauseTimer > 0 {
+                    agents[i].pauseTimer -= dt
+                    continue
+                }
+
+                agents[i].weavePhase += dt * 3.8
+                agents[i].progress += dt * agents[i].baseSpeed * rushMult
+
                 if agents[i].progress >= 1.0 {
                     agents[i].progress -= 1.0
                     let arrived = agents[i].nextCoord
@@ -1499,6 +1736,11 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                     agents[i].currentCoord = arrived
 
                     let allNbrs = connectedNeighbors(of: arrived, in: driveableSet)
+                    // At intersections (3+ neighbors), vehicles briefly yield/slow down
+                    if allNbrs.count >= 3 && (agents[i].kind == .angkotBus || agents[i].kind == .ojolMotor) && Int.random(in: 0...4) == 0 {
+                        agents[i].pauseTimer = 1.6
+                    }
+
                     let forwardNbrs = allNbrs.filter { $0 != cameFrom }
                     if let chosen = forwardNbrs.randomElement() ?? allNbrs.first {
                         agents[i].nextCoord = chosen
@@ -1520,19 +1762,57 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
                 let laneOffset: Float
                 if rKind == .fourLane {
                     let base = agents[i].laneSlot == 0 ? Float(0.46) : Float(1.04)
-                    laneOffset = agents[i].kind == .motorbike ? base + 0.16 : base
+                    if agents[i].kind == .motorbike || agents[i].kind == .ojolMotor {
+                        // Indonesian motorcycle lane-filtering ("selap-selip") weave
+                        laneOffset = base + 0.16 + sin(agents[i].weavePhase) * 0.18
+                    } else {
+                        laneOffset = base
+                    }
                 } else {
-                    laneOffset = agents[i].kind == .motorbike ? 0.68 : 0.44
+                    if agents[i].kind == .motorbike || agents[i].kind == .ojolMotor {
+                        laneOffset = 0.62 + sin(agents[i].weavePhase) * 0.16
+                    } else {
+                        laneOffset = 0.44
+                    }
                 }
 
-                let deckLiftA: Float = pA.y < -0.16 ? 0.31 : 0.05
-                let deckLiftB: Float = pB.y < -0.16 ? 0.31 : 0.05
+                let deckLiftA: Float = pA.y < -0.18 ? 0.31 : 0.05
+                let deckLiftB: Float = pB.y < -0.18 ? 0.31 : 0.05
                 let wy = (pA.y + deckLiftA) + ((pB.y + deckLiftB) - (pA.y + deckLiftA)) * frac
                 let wx = pA.x + (pB.x - pA.x) * frac + leftX * laneOffset
                 let wz = pA.z + (pB.z - pA.z) * frac + leftZ * laneOffset
 
                 agents[i].node.position = SCNVector3(wx, wy, wz)
                 agents[i].node.look(at: SCNVector3(pB.x + leftX * laneOffset, pB.y + deckLiftB, pB.z + leftZ * laneOffset))
+            }
+
+            // Update Sidewalk Pedestrians
+            for pIdx in pedestrians.indices {
+                pedestrians[pIdx].progress += dt * pedestrians[pIdx].speed
+                if pedestrians[pIdx].progress >= 1.0 {
+                    pedestrians[pIdx].progress -= 1.0
+                    let arrived = pedestrians[pIdx].coordB
+                    let cameFrom = pedestrians[pIdx].coordA
+                    pedestrians[pIdx].coordA = arrived
+                    let nbrs = connectedNeighbors(of: arrived, in: driveableSet)
+                    if let next = nbrs.filter({ $0 != cameFrom }).randomElement() ?? nbrs.first {
+                        pedestrians[pIdx].coordB = next
+                    }
+                }
+                let cA = pedestrians[pIdx].coordA
+                let cB = pedestrians[pIdx].coordB
+                let pA = worldPosition(for: cA)
+                let pB = worldPosition(for: cB)
+                let frac = pedestrians[pIdx].progress
+                let dx = Float(cB.x - cA.x)
+                let dz = Float(cB.z - cA.z)
+                let off = pedestrians[pIdx].sideOffset
+                let deckA: Float = pA.y < -0.18 ? 0.31 : 0.05
+                let deckB: Float = pB.y < -0.18 ? 0.31 : 0.05
+                let wy = (pA.y + deckA) + ((pB.y + deckB) - (pA.y + deckA)) * frac
+                let wx = pA.x + (pB.x - pA.x) * frac + dz * off
+                let wz = pA.z + (pB.z - pA.z) * frac - dx * off
+                pedestrians[pIdx].node.position = SCNVector3(wx, wy, wz)
             }
 
             if cameraMode == .followVehicle, !agents.isEmpty {
@@ -1567,10 +1847,10 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             scene.lightingEnvironment.contents = sky
             scene.lightingEnvironment.intensity = 1.35
             scene.fogColor = UIColor(red: 0.76, green: 0.90, blue: 0.99, alpha: 1.0)
-            ambientLightNode.light?.intensity = 380
-            skyFillLightNode.light?.intensity = 340
-            sunLightNode.light?.intensity = 1480
-            sunLightNode.light?.color = UIColor(red: 1.0, green: 0.96, blue: 0.89, alpha: 1.0)
+            ambientLightNode.light?.intensity = 410
+            skyFillLightNode.light?.intensity = 320
+            sunLightNode.light?.intensity = 1440
+            sunLightNode.light?.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1.0)
             cameraNode.camera?.bloomIntensity = bloom ? 0.28 : 0.0
 
         case .sunset:
@@ -1579,7 +1859,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             scene.lightingEnvironment.contents = sky
             scene.lightingEnvironment.intensity = 1.15
             scene.fogColor = UIColor(red: 0.92, green: 0.58, blue: 0.38, alpha: 1.0)
-            ambientLightNode.light?.intensity = 310
+            ambientLightNode.light?.intensity = 320
             skyFillLightNode.light?.intensity = 240
             sunLightNode.light?.intensity = 1150
             sunLightNode.light?.color = UIColor(red: 1.0, green: 0.68, blue: 0.38, alpha: 1.0)
@@ -1602,7 +1882,6 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
         scene.fogEndDistance = fog ? 210 : 440
     }
 
-    // Dual-Axis Camera Transform: Horizontal Yaw (Y) + Vertical Pitch (X), Zero Roll!
     func updateCameraTransform() {
         let groundY = terrainHeight(x: panTarget.x, z: panTarget.y)
         cameraPivot.position = SCNVector3(panTarget.x, groundY, panTarget.y)
@@ -1679,7 +1958,6 @@ struct SceneKitViewport: UIViewRepresentable {
         pan1.minimumNumberOfTouches = 1
         pan1.maximumNumberOfTouches = 1
 
-        // 2-Finger Dual-Axis Orbit: Drag Left/Right = Horizontal Yaw, Drag Up/Down = Vertical Pitch!
         let orbit2 = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onTwoFingerOrbit(_:)))
         orbit2.minimumNumberOfTouches = 2
         orbit2.maximumNumberOfTouches = 2
@@ -1743,7 +2021,6 @@ struct SceneKitViewport: UIViewRepresentable {
             let dx = Float(current.x - lastOrbit2.x)
             let dy = Float(current.y - lastOrbit2.y)
             lastOrbit2 = current
-            // Horizontal drag -> Horizontal Yaw; Vertical drag Up/Down -> Vertical Pitch!
             engine.orbitDualAxis(deltaYaw: -dx * 0.0085, deltaPitch: dy * 0.0065)
         }
 

@@ -47,10 +47,10 @@ enum CityWeather: String, CaseIterable, Codable {
 
     var windSummary: String {
         switch self {
-        case .cerahBerawan: return "Angin Tenggara 11 km/j, jarak pandang 14 km, ideal untuk konstruksi."
-        case .anginSepoi: return "Angin Lembah 24 km/j menggoyangkan pepohonan & menerbangkan daun gugur."
-        case .hujanTropis: return "Curah hujan sedang, kelembapan 88%, pasokan air sungai meningkat."
-        case .kabutPegunungan: return "Kabut tipis turun dari lereng pegunungan, jarak pandang 6 km."
+        case .cerahBerawan: return "Angin Tenggara 12 km/j menggoyangkan rumput & menggugurkan daun tipis."
+        case .anginSepoi: return "Angin Lembah 26 km/j meniup pepohonan & menerbangkan daun kering ke jalan."
+        case .hujanTropis: return "Hujan deras membuat debit & permukaan air sungai naik, jalan basah mengilap."
+        case .kabutPegunungan: return "Kabut sejuk turun dari lereng pegunungan menyelimuti lembah kota."
         }
     }
 }
@@ -87,7 +87,7 @@ enum PlayMode: String, CaseIterable, Identifiable, Codable {
     var title: String { self == .real ? "Mode Real (APBD)" : "Mode Sandbox" }
     var subtitle: String {
         self == .real
-            ? "Modal awal Rp 150 Miliar, kuas zona otomatis tumbuh Lv 1–5, AI Perizinan & pajak riil"
+            ? "Modal awal Rp 150 Miliar, konstruksi bertahap realistis, perilaku lalu lintas Indonesia & AI"
             : "Anggaran APBD tak terbatas untuk bebas merancang tata kota impian"
     }
 }
@@ -199,17 +199,21 @@ enum ZoneBrushKind: String, CaseIterable, Identifiable, Codable {
         }
     }
     func capacity(forLevel level: Int) -> Int {
+        if level < 3 { return 0 }
+        let b = level - 2
         switch self {
-        case .residentialLow: return 2 + level
-        case .residentialHigh: return 4 + level * 4
-        case .commercial: return 2 + level
+        case .residentialLow: return 2 + b
+        case .residentialHigh: return 4 + b * 4
+        case .commercial: return 2 + b
         case .industrialOffice, .parkGreen, .clearZone: return 0
         }
     }
     func jobSlots(forLevel level: Int) -> Int {
+        if level < 3 { return 0 }
+        let b = level - 2
         switch self {
-        case .commercial: return 6 + level * 3
-        case .industrialOffice: return 10 + level * 5
+        case .commercial: return 6 + b * 3
+        case .industrialOffice: return 10 + b * 5
         default: return 0
         }
     }
@@ -234,7 +238,8 @@ enum ZoneBrushKind: String, CaseIterable, Identifiable, Codable {
         }
     }
     func monthlyTaxIDR(level: Int) -> Int64 {
-        let mult = Int64(max(1, level))
+        if level < 3 { return 0 }
+        let mult = Int64(max(1, level - 2))
         switch self {
         case .residentialLow: return 12_000_000 * mult
         case .residentialHigh: return 26_000_000 * mult
@@ -356,6 +361,11 @@ struct RoadTile: Identifiable, Codable {
     var curveYaw: Float = 0.0
 }
 
+// Realistic 4-Stage Construction Pipeline:
+// 0 = Patok Tanah & Tumpukan Bata/Pasir
+// 1 = Pondasi Batu Kali & Sloof Beton
+// 2 = Dinding Bata Merah & Perancah Bambu (Scaffolding)
+// 3..7 = Bangunan Selesai Lv 1..5 & Siap Dihuni Warga
 struct ZonedPlot: Identifiable, Codable {
     var id: String { "\(coord.x)_\(coord.z)" }
     let coord: GridCoord

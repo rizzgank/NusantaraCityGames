@@ -141,7 +141,7 @@ final class GameViewModel: ObservableObject {
             AIChatMessage(
                 isFromUser: false,
                 senderName: "NUSA AI (Asisten Walikota)",
-                text: "Selamat bertugas, Pak/Bu Walikota \(selectedMap.title)! Saya memantau cuaca real-time, kondisi APBD, dan meneruskan surat perizinan investor (seperti Indomaret, Alfamart, SPBU, atau Bank) yang ingin membuka cabang di kota Anda.",
+                text: "Selamat bertugas, Pak/Bu Walikota \(selectedMap.title)! Lahan perumahan yang Anda cat akan dibangun bertahap mulai dari patok tanah, pondasi batu kali, dinding bata, hingga siap dihuni keluarga baru.",
                 timestamp: currentClockText()
             )
         ]
@@ -260,9 +260,9 @@ final class GameViewModel: ObservableObject {
             if roads.count < 4 {
                 reply = "🛣️ **Saran NUSA AI:** Bangun terlebih dahulu jaringan **Jalan 2 Lajur** atau **Arteri 4 Lajur**, lalu cat **Zona Hunian** dan **Komersial** di petak biru tepi jalan."
             } else if powerSupply < powerDemand || waterSupply < waterDemand {
-                reply = "⚡ **Prioritas Mendesak:** Pasokan listrik/air sedang defisit! Segera bangun **Gardu Listrik** dan **Menara PDAM** di menu Utilitas agar warga tidak pindah."
+                reply = "⚡ **Prioritas Mendesak:** Pasokan listrik/air sedang defisit! Segera bangun **Gardu Listrik** dan **Menara PDAM** di menu Utilitas agar proyek konstruksi bisa selesai."
             } else {
-                reply = "🏙️ **Rekomendasi Pengembangan:** Kota berjalan stabil! Tambahkan **SD Negeri / Universitas** untuk menaikkan level gedung hunian ke Level 5, atau buka permohonan investor cabang ritel."
+                reply = "🏙️ **Rekomendasi Pengembangan:** Kota berjalan stabil! Tambahkan **SD Negeri / Universitas** untuk menaikkan level bangunan, atau terima permohonan cabang ritel baru."
             }
         } else {
             reply = "Siap, Pak/Bu Walikota! Saya telah mencatat arahan '\(query)'. Saat ini kota \(selectedMap.title) berada dalam cuaca **\(weather.title)** dengan populasi **\(population) jiwa** dan tingkat kebahagiaan **\(happiness)%**."
@@ -322,9 +322,9 @@ final class GameViewModel: ObservableObject {
                 plots[spot] = ZonedPlot(
                     coord: spot,
                     kind: .commercial,
-                    buildingLevel: 2,
-                    residents: 4,
-                    maxResidents: 4,
+                    buildingLevel: 3,
+                    residents: 3,
+                    maxResidents: 3,
                     forcedBrandSkin: permit.brandSkin
                 )
                 syncEngine()
@@ -374,7 +374,7 @@ final class GameViewModel: ObservableObject {
     }
 
     func slotSnapshot(_ slot: Int) -> CitySaveSnapshot? {
-        guard let data = UserDefaults.standard.data(forKey: "nusantara.v7.slot.\(slot)") else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: "nusantara.v8.slot.\(slot)") else { return nil }
         return try? JSONDecoder().decode(CitySaveSnapshot.self, from: data)
     }
 
@@ -396,7 +396,7 @@ final class GameViewModel: ObservableObject {
             customGebrakans: customGebrakans
         )
         if let encoded = try? JSONEncoder().encode(snap) {
-            UserDefaults.standard.set(encoded, forKey: "nusantara.v7.slot.\(slot)")
+            UserDefaults.standard.set(encoded, forKey: "nusantara.v8.slot.\(slot)")
             showToast("Kota tersimpan di Slot \(slot)!")
         }
     }
@@ -477,7 +477,13 @@ final class GameViewModel: ObservableObject {
 
         if anchorCoord == nil && activeCategory != .bulldoze {
             if let p = plots[coord] {
-                let stageText = p.buildingLevel == 0 ? "Konstruksi (Scaffolding)" : "Level \(p.buildingLevel) / 5"
+                let stageText: String
+                switch p.buildingLevel {
+                case 0: stageText = "Tahap 1/4: Patok Tanah & Tumpukan Bata"
+                case 1: stageText = "Tahap 2/4: Pondasi Batu Kali & Kolom"
+                case 2: stageText = "Tahap 3/4: Dinding Bata Merah & Perancah"
+                default: stageText = "Bangunan Selesai • Level \(p.buildingLevel - 2) / 5"
+                }
                 let brandLabel = p.forcedBrandSkin == 1 ? " (Cabang Indomaret)" : (p.forcedBrandSkin == 2 ? " (Cabang Alfamart)" : "")
                 inspectCard = InspectCardData(
                     title: p.kind.title + brandLabel,
@@ -614,11 +620,11 @@ final class GameViewModel: ObservableObject {
                 guard spend(totalCost) else { return }
 
                 for c in valid {
-                    let startLv = selZoneBrush == .parkGreen ? 1 : 0
-                    let cap = selZoneBrush.capacity(forLevel: max(1, startLv))
-                    plots[c] = ZonedPlot(coord: c, kind: selZoneBrush, buildingLevel: startLv, residents: 0, maxResidents: cap)
+                    let startLv = selZoneBrush == .parkGreen ? 3 : 0
+                    plots[c] = ZonedPlot(coord: c, kind: selZoneBrush, buildingLevel: startLv, residents: 0, maxResidents: 0)
                 }
                 undoStack.append(.placedBatchZones(valid, totalCost))
+                aiAgentMessage = "Lahan dipatok! Tukang & truk material mulai mengerjakan pondasi satu per satu."
             }
         }
 
@@ -712,7 +718,7 @@ final class GameViewModel: ObservableObject {
             p.hasWater = selectedMode == .sandbox || wSup >= wDem
             plots[key] = p
             pop += p.residents
-            jobs += p.kind.jobSlots(forLevel: max(1, p.buildingLevel))
+            jobs += p.kind.jobSlots(forLevel: p.buildingLevel)
             if p.kind == .parkGreen { parkBonus += 3 }
         }
 
@@ -738,35 +744,48 @@ final class GameViewModel: ObservableObject {
 
     private func startSimulationLoop() {
         simTimer?.invalidate()
-        simTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        simTimer = Timer.scheduledTimer(withTimeInterval: 4.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.screen == .inGame else { return }
                 self.simTickCount += 1
 
                 var visualChanged = false
-                let maxAllowedLevel = min(5, 1 + (self.educationIndex / 22) + (self.happiness >= 85 ? 1 : 0))
+                let maxAllowedLevel = min(7, 3 + (self.educationIndex / 22) + (self.happiness >= 85 ? 1 : 0))
 
-                for key in self.plots.keys {
+                // Realistic Organic Growth: Only up to 2 plots advance construction per cycle so houses appear one by one!
+                var constructionSlotsThisTick = 2
+                let sortedKeys = self.plots.keys.sorted { ($0.x + $0.z) < ($1.x + $1.z) }
+
+                for key in sortedKeys {
                     guard var p = self.plots[key], p.kind != .parkGreen else { continue }
                     let connected = self.isNearRoad(p.coord)
 
                     if connected && p.hasPower && p.hasWater {
                         p.isAbandoned = false
-                        if p.buildingLevel == 0 {
-                            p.buildingLevel = 1
-                            p.maxResidents = p.kind.capacity(forLevel: 1)
-                            visualChanged = true
+                        if p.buildingLevel < 3 {
+                            if constructionSlotsThisTick > 0 {
+                                constructionSlotsThisTick -= 1
+                                p.buildingLevel += 1
+                                if p.buildingLevel == 3 {
+                                    p.maxResidents = p.kind.capacity(forLevel: 3)
+                                    p.residents = 1
+                                }
+                                visualChanged = true
+                            }
                         } else if p.residents < p.maxResidents {
-                            p.residents = min(p.maxResidents, p.residents + Int.random(in: 1...2))
+                            p.residents = min(p.maxResidents, p.residents + 1)
                         } else if p.residents >= p.maxResidents && p.buildingLevel < maxAllowedLevel {
-                            p.buildingLevel += 1
-                            p.maxResidents = p.kind.capacity(forLevel: p.buildingLevel)
-                            visualChanged = true
+                            if constructionSlotsThisTick > 0 {
+                                constructionSlotsThisTick -= 1
+                                p.buildingLevel += 1
+                                p.maxResidents = p.kind.capacity(forLevel: p.buildingLevel)
+                                visualChanged = true
+                            }
                         }
                     } else {
                         if p.residents > 0 {
                             p.residents = max(0, p.residents - 1)
-                        } else if p.buildingLevel > 0 && !p.isAbandoned {
+                        } else if p.buildingLevel >= 3 && !p.isAbandoned {
                             p.isAbandoned = true
                             visualChanged = true
                         }
@@ -778,7 +797,7 @@ final class GameViewModel: ObservableObject {
                     let customTaxBonus = self.customGebrakans.reduce(0.0) { $0 + $1.taxMultiplierBonus }
                     let mult: Double = (self.activeGebrakans.contains(.digitalUmkm) ? 1.25 : 1.0) + customTaxBonus
                     let tax = self.plots.values.reduce(Int64(0)) { acc, p in
-                        guard p.buildingLevel > 0 && !p.isAbandoned else { return acc }
+                        guard p.buildingLevel >= 3 && !p.isAbandoned else { return acc }
                         let ratio = p.maxResidents > 0 ? Double(p.residents) / Double(p.maxResidents) : 1.0
                         return acc + Int64(Double(p.kind.monthlyTaxIDR(level: p.buildingLevel)) * ratio * mult)
                     }
@@ -1288,7 +1307,7 @@ struct RootGameView: View {
                                     }
                                 }
                                 .padding(10)
-                                .frame(width: 225)
+                                .frame(width: 235)
                                 .background(.ultraThinMaterial)
                                 .cornerRadius(12)
                             }

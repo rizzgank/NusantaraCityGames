@@ -9,7 +9,7 @@ BASE_DIR = "GameAssets"
 TEXTURES_DIR = os.path.join(BASE_DIR, "Textures")
 AUDIO_DIR = os.path.join(BASE_DIR, "Audio")
 ICONSET_DIR = os.path.join("Assets.xcassets", "AppIcon.appiconset")
-RNG = np.random.default_rng(20261117)
+RNG = np.random.default_rng(20261118)
 
 
 def ensure_dirs():
@@ -97,12 +97,11 @@ def generate_sky_domes():
     above = v <= 0.52
     t_up = np.clip(v / 0.52, 0.0, 1.0)
 
-    # 1. Crisp Cities: Skylines Daylight Sky with Cumulus Clouds
     cloud_n = fbm_noise_rect(W, H, octaves=(8, 24, 64))
     day = np.zeros((H, W, 3), dtype=np.float32)
-    day[..., 0] = np.where(above, 32 * (1 - t_up) + 178 * (t_up ** 1.55), 86)
-    day[..., 1] = np.where(above, 128 * (1 - t_up) + 224 * (t_up ** 1.35), 118)
-    day[..., 2] = np.where(above, 238 * (1 - t_up) + 252 * (t_up ** 1.15), 134)
+    day[..., 0] = np.where(above, 36 * (1 - t_up) + 184 * (t_up ** 1.55), 86)
+    day[..., 1] = np.where(above, 134 * (1 - t_up) + 226 * (t_up ** 1.35), 118)
+    day[..., 2] = np.where(above, 240 * (1 - t_up) + 252 * (t_up ** 1.15), 134)
     cloud_mask = np.clip((cloud_n - 0.50) * 3.0, 0.0, 1.0) * np.where(above, 1.0 - (t_up ** 3.2), 0.0)
     day[..., 0] = day[..., 0] * (1 - cloud_mask * 0.80) + 254 * (cloud_mask * 0.80)
     day[..., 1] = day[..., 1] * (1 - cloud_mask * 0.80) + 254 * (cloud_mask * 0.80)
@@ -112,7 +111,6 @@ def generate_sky_domes():
     day = np.clip(day + sun_glow[..., None] * np.array([1.0, 0.95, 0.82]), 0, 255)
     Image.fromarray(day.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_day_equirect.png"), format="PNG")
 
-    # 2. Golden Hour Sunset
     sunset = np.zeros((H, W, 3), dtype=np.float32)
     sunset[..., 0] = np.where(above, 26 * (1 - t_up) + 254 * (t_up ** 1.5), 54)
     sunset[..., 1] = np.where(above, 44 * (1 - t_up) + 154 * (t_up ** 1.7), 44)
@@ -122,7 +120,6 @@ def generate_sky_domes():
     sunset = np.clip(sunset + glow2[..., None] * np.array([1.0, 0.72, 0.35]), 0, 255)
     Image.fromarray(sunset.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_sunset_equirect.png"), format="PNG")
 
-    # 3. Starry Night
     night = np.zeros((H, W, 3), dtype=np.float32)
     night[..., 0] = np.where(above, 6 * (1 - t_up) + 22 * t_up, 8)
     night[..., 1] = np.where(above, 10 * (1 - t_up) + 32 * t_up, 10)
@@ -140,16 +137,16 @@ def generate_foliage_texture(path: str, base_rgb: tuple, highlight_rgb: tuple, p
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     cx = S // 2
-    for i in range(360):
-        t = i / 360.0
+    for i in range(380):
+        t = i / 380.0
         if pine_shape:
-            y = int(36 + t * 424)
-            half_w = int(16 + t * 194)
+            y = int(34 + t * 428)
+            half_w = int(14 + t * 196)
             x = int(cx + RNG.integers(-half_w, half_w + 1))
             r = int(RNG.integers(12, 26))
         else:
             ang = RNG.uniform(0, 2 * np.pi)
-            rad = np.sqrt(RNG.uniform(0, 1)) * 214
+            rad = np.sqrt(RNG.uniform(0, 1)) * 218
             x = int(cx + np.cos(ang) * rad)
             y = int(244 + np.sin(ang) * rad * 0.88)
             r = int(RNG.integers(14, 34))
@@ -158,9 +155,27 @@ def generate_foliage_texture(path: str, base_rgb: tuple, highlight_rgb: tuple, p
             int(base_rgb[0] * (1 - mix) + highlight_rgb[0] * mix),
             int(base_rgb[1] * (1 - mix) + highlight_rgb[1] * mix),
             int(base_rgb[2] * (1 - mix) + highlight_rgb[2] * mix),
-            250,
+            252,
         )
         draw.ellipse([x - r, y - r, x + r, y + r], fill=col)
+    img.save(path, format="PNG")
+
+
+def generate_grass_tuft_texture(path: str):
+    S = 256
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    for b in range(42):
+        bx = int(RNG.integers(36, S - 36))
+        lean = int(RNG.integers(-48, 49))
+        top_y = int(RNG.integers(24, 130))
+        green = int(RNG.integers(118, 188))
+        red = int(green * 0.48)
+        blue = int(green * 0.34)
+        draw.polygon(
+            [(bx - 5, S), (bx + 5, S), (bx + lean + 2, top_y), (bx + lean - 2, top_y)],
+            fill=(red, green, blue, 248),
+        )
     img.save(path, format="PNG")
 
 
@@ -170,44 +185,44 @@ def generate_textures():
     n_fine = fbm_noise(S, octaves=(16, 64, 256))
     yy, xx = np.mgrid[0:S, 0:S]
 
-    # 1. Realistic Asphalt & Multi-Lane Roads with Concrete Curbs
+    # 1. Realistic Asphalt with Aggregate Patches, Tar Seams & Indonesian Black-White Curbs
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
-    asphalt[..., 0] = 44 + n_base * 14 + n_fine * 8
-    asphalt[..., 1] = 46 + n_base * 14 + n_fine * 8
-    asphalt[..., 2] = 52 + n_base * 16 + n_fine * 10
-    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=3)
+    tar_patch = ((n_base > 0.62) & (n_base < 0.72)).astype(np.float32) * -10.0
+    asphalt[..., 0] = 46 + n_base * 15 + n_fine * 9 + tar_patch
+    asphalt[..., 1] = 48 + n_base * 15 + n_fine * 9 + tar_patch
+    asphalt[..., 2] = 53 + n_base * 16 + n_fine * 10 + tar_patch
+    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=3)
 
-    # 2-Lane Road with raised concrete curbs at outer edges & clean lane markings
+    # Indonesian Black-White Painted Kanstin Curbs along road edges
+    kanstin_white = ((yy // 64) % 2 == 0)
     road_2l = asphalt.copy()
-    road_2l[:, 0:34] = [178, 180, 184]
-    road_2l[:, S - 34:S] = [178, 180, 184]
-    road_2l[:, 36:48] = [242, 242, 238]
-    road_2l[:, S - 48:S - 36] = [242, 242, 238]
+    road_2l[:, 0:32] = np.where(kanstin_white[:, 0:32, None], [225, 226, 228], [32, 34, 38])
+    road_2l[:, S - 32:S] = np.where(kanstin_white[:, S - 32:S, None], [225, 226, 228], [32, 34, 38])
+    road_2l[:, 35:47] = [238, 238, 234]
+    road_2l[:, S - 47:S - 35] = [238, 238, 234]
     for y in range(0, S, 128):
         road_2l[y:y + 68, S // 2 - 7:S // 2 + 7] = [248, 206, 46]
     save_rgb_png(road_2l, os.path.join(TEXTURES_DIR, "road_2lane_albedo.png"))
 
-    # Wide 4-Lane Arterial Boulevard with Median & 4 Lane Positions
     road_4l = asphalt.copy()
-    road_4l[:, 0:30] = [178, 180, 184]
-    road_4l[:, S - 30:S] = [178, 180, 184]
-    road_4l[:, 32:44] = [244, 244, 240]
-    road_4l[:, S - 44:S - 32] = [244, 244, 240]
+    road_4l[:, 0:28] = np.where(kanstin_white[:, 0:28, None], [225, 226, 228], [32, 34, 38])
+    road_4l[:, S - 28:S] = np.where(kanstin_white[:, S - 28:S, None], [225, 226, 228], [32, 34, 38])
+    road_4l[:, 31:43] = [240, 240, 236]
+    road_4l[:, S - 43:S - 31] = [240, 240, 236]
     road_4l[:, S // 2 - 16:S // 2 - 5] = [248, 194, 34]
     road_4l[:, S // 2 + 5:S // 2 + 16] = [248, 194, 34]
     for y in range(0, S, 128):
-        road_4l[y:y + 64, S // 4 - 5:S // 4 + 5] = [244, 244, 240]
-        road_4l[y:y + 64, (3 * S) // 4 - 5:(3 * S) // 4 + 5] = [244, 244, 240]
+        road_4l[y:y + 64, S // 4 - 5:S // 4 + 5] = [240, 240, 236]
+        road_4l[y:y + 64, (3 * S) // 4 - 5:(3 * S) // 4 + 5] = [240, 240, 236]
     save_rgb_png(road_4l, os.path.join(TEXTURES_DIR, "road_4lane_albedo.png"))
 
-    # Intersection with Zebra Crossings
     inter = asphalt.copy()
     for stripe_x in range(180, 844, 72):
-        inter[38:145, stripe_x:stripe_x + 36] = [244, 244, 240]
-        inter[S - 145:S - 38, stripe_x:stripe_x + 36] = [244, 244, 240]
+        inter[38:145, stripe_x:stripe_x + 36] = [242, 242, 238]
+        inter[S - 145:S - 38, stripe_x:stripe_x + 36] = [242, 242, 238]
     for stripe_y in range(180, 844, 72):
-        inter[stripe_y:stripe_y + 36, 38:145] = [244, 244, 240]
-        inter[stripe_y:stripe_y + 36, S - 145:S - 38] = [244, 244, 240]
+        inter[stripe_y:stripe_y + 36, 38:145] = [242, 242, 238]
+        inter[stripe_y:stripe_y + 36, S - 145:S - 38] = [242, 242, 238]
     save_rgb_png(inter, os.path.join(TEXTURES_DIR, "road_intersection_albedo.png"))
 
     # 2. Architectural Sidewalk Paving
@@ -219,19 +234,27 @@ def generate_textures():
     paving[..., 2] = np.where(checker > 0, 188, 172) + n_fine * 12 - grout * 36
     save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"))
 
-    # 3. High-Detail Lush Tropical Grass + Normal + Water Ripples
+    # 3. High-Detail Tropical Meadow Grass + Flowing River Surface with Whitewater Foam Streaks
     grass = np.zeros((S, S, 3), dtype=np.float32)
-    blade_streaks = np.sin(xx * 0.55 + n_fine * 7.0) * 7.0
-    grass[..., 0] = 68 + n_base * 26 + n_fine * 14 + blade_streaks * 0.4
-    grass[..., 1] = 142 + n_base * 36 + n_fine * 18 + blade_streaks
-    grass[..., 2] = 56 + n_base * 18 + n_fine * 10
+    blade_streaks = np.sin(xx * 0.65 + n_fine * 8.0) * 8.0
+    wildflower = ((n_fine > 0.86) & ((xx + yy) % 19 == 0)).astype(np.float32) * 55.0
+    grass[..., 0] = 66 + n_base * 28 + n_fine * 15 + blade_streaks * 0.4 + wildflower
+    grass[..., 1] = 144 + n_base * 38 + n_fine * 18 + blade_streaks + wildflower * 0.8
+    grass[..., 2] = 52 + n_base * 18 + n_fine * 10
     save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"))
-    save_rgb_png(generate_normal_from_height(n_fine, 3.6), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=3)
+    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=3)
 
-    wave_h = np.sin(xx * 0.09 + n_base * 5.5) * 0.5 + np.cos(yy * 0.12 + n_fine * 4.5) * 0.5
-    save_rgb_png(generate_normal_from_height(wave_h, 4.0), os.path.join(TEXTURES_DIR, "water_normal.png"), micro_grain=2)
+    # Flowing River Texture (Deep turquoise current + organic white foam streaks!)
+    stream_wave = np.sin(xx * 0.08 + n_base * 6.0) * 0.5 + np.cos(yy * 0.035 + n_fine * 4.5) * 0.5
+    foam = np.clip((stream_wave + n_fine * 0.65 - 0.82) * 5.2, 0.0, 1.0)
+    river_col = np.zeros((S, S, 3), dtype=np.float32)
+    river_col[..., 0] = 18 + n_base * 18 + foam * 215
+    river_col[..., 1] = 104 + n_base * 32 + foam * 138
+    river_col[..., 2] = 142 + n_base * 28 + foam * 106
+    save_rgb_png(river_col, os.path.join(TEXTURES_DIR, "river_water_albedo.png"), micro_grain=2)
+    save_rgb_png(generate_normal_from_height(stream_wave, 4.4), os.path.join(TEXTURES_DIR, "water_normal.png"), micro_grain=2)
 
-    # 4. Terracotta Roof Tiles + Normal
+    # 4. Terracotta Roof Tiles + Red Brick Construction Texture
     tile_wave = np.sin((xx / 16.0) * np.pi) * 20.0
     row_step = ((yy % 32) < 4).astype(np.float32) * 36.0
     roof_h = (np.sin((xx / 16.0) * np.pi) * 0.5 + 0.5) - ((yy % 32) < 4).astype(np.float32) * 0.4
@@ -242,7 +265,16 @@ def generate_textures():
     save_rgb_png(roof, os.path.join(TEXTURES_DIR, "roof_terracotta_albedo.png"))
     save_rgb_png(generate_normal_from_height(roof_h, 4.5), os.path.join(TEXTURES_DIR, "roof_normal.png"), micro_grain=2)
 
-    # 5. Architectural Curtain-Wall Glass & Concrete Mullions (Diffuse + Metalness + Roughness + Normal + Night Emissive!)
+    brick_row = (yy // 24)
+    brick_shift = (brick_row % 2) * 32
+    mortar = ((yy % 24 < 3) | (((xx + brick_shift) % 64) < 3)).astype(np.float32)
+    brick = np.zeros((S, S, 3), dtype=np.float32)
+    brick[..., 0] = np.where(mortar > 0, 152, 178 + n_fine * 24)
+    brick[..., 1] = np.where(mortar > 0, 150, 76 + n_fine * 16)
+    brick[..., 2] = np.where(mortar > 0, 146, 54 + n_fine * 14)
+    save_rgb_png(brick, os.path.join(TEXTURES_DIR, "brick_construction_albedo.png"), micro_grain=3)
+
+    # 5. Architectural Curtain-Wall Glass & Concrete Mullions
     win_x = (xx % 64 >= 8) & (xx % 64 <= 56)
     win_y = (yy % 64 >= 10) & (yy % 64 <= 54)
     is_window = win_x & win_y
@@ -252,7 +284,6 @@ def generate_textures():
     cell_id = (xx // 64) * 31 + (yy // 64) * 17
     lit_mask = glass_pane & ((cell_id % 4) != 0)
 
-    # Sky-gradient reflection baked subtly into architectural glass panes
     pane_v = ((yy % 64).astype(np.float32)) / 64.0
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
     facade_day[..., 0] = np.where(glass_pane, 48 + pane_v * 34 + n_base * 12, 214 + n_base * 16)
@@ -260,7 +291,6 @@ def generate_textures():
     facade_day[..., 2] = np.where(glass_pane, 154 + pane_v * 52 + n_base * 16, 220 + n_base * 16)
     save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"), micro_grain=3)
 
-    # PBR Metalness & Roughness Maps: Glass = reflective/smooth, Concrete mullions = matte!
     metal_map = np.where(glass_pane, 215.0, 18.0)
     rough_map = np.where(glass_pane, 24.0 + n_fine * 14.0, 195.0 + n_fine * 24.0)
     save_gray_png(metal_map, os.path.join(TEXTURES_DIR, "building_facade_metalness.png"))
@@ -275,7 +305,7 @@ def generate_textures():
     facade_night[..., 2] = np.where(lit_mask, 124, 18)
     save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=2)
 
-    # 6. Residential House Plaster & Wood Trim
+    # 6. Residential House Plaster & Ceramic Base
     house_wall = np.zeros((S, S, 3), dtype=np.float32)
     house_wall[..., 0] = np.where(glass_pane, 48, 244 + n_base * 10)
     house_wall[..., 1] = np.where(glass_pane, 76, 238 + n_base * 10)
@@ -313,10 +343,11 @@ def generate_textures():
     alfa[320:940, 70:950] = [56, 88, 130]
     save_rgb_png(alfa, os.path.join(TEXTURES_DIR, "alfamart_facade_albedo.png"), micro_grain=2)
 
-    # 10. Alpha-Cutout Foliage Textures
+    # 10. Alpha-Cutout Foliage & 3D Meadow Grass Tufts
     generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tropical_foliage.png"), (34, 112, 42), (88, 184, 76), pine_shape=False)
     generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_pine_foliage.png"), (22, 84, 36), (58, 146, 68), pine_shape=True)
     generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tabebuya_foliage.png"), (218, 102, 146), (254, 180, 210), pine_shape=False)
+    generate_grass_tuft_texture(os.path.join(TEXTURES_DIR, "grass_tuft_cutout.png"))
 
 
 def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 22050):
@@ -357,4 +388,4 @@ if __name__ == "__main__":
     generate_sky_domes()
     generate_textures()
     generate_audio()
-    print("v7.0 Next-Gen PBR Glass/Metalness Maps, Sky Domes, Foliage & Audio generated!")
+    print("v8.0 Living Realism PBR Textures, River Foam, 3D Grass Tufts & Audio generated!")
