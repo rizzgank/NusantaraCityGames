@@ -1,4 +1,4 @@
-﻿name: Build City Building Nusantara HD IPA
+﻿name: Build City Building Nusantara v3.0 HD IPA
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate HD Assets & AppIcon
+      - name: Generate HD PBR Textures, Terrain Maps, Audio & AppIcon
         run: |
           rm -rf Resources GameAssets Assets.xcassets
           python3 Scripts/generate_assets.py
@@ -60,12 +60,12 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CityBuildingNusantara-HD-IPA
+          name: CityBuildingNusantara-v3-HD-IPA
           path: CityBuildingNusantara.ipa
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.2.${{ github.run_number }}
-          name: "City Building : Nusantara Project v2.2.${{ github.run_number }} (HD Realistis)"
+          tag_name: v3.0.${{ github.run_number }}
+          name: "City Building : Nusantara Project v3.0.${{ github.run_number }} (HD Realistic)"
           files: CityBuildingNusantara.ipa
