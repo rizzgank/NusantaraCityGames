@@ -50,14 +50,16 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
             build
 
-      - name: Ad-Hoc Sign & Package Payload into CityBuildingNusantara.ipa
+      - name: Clean Detritus, Ad-Hoc Sign & Package IPA
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          codesign --force --sign - --timestamp=none Payload/CityBuildingNusantara.app
-          ditto -c -k --sequesterRsrc --keepParent Payload CityBuildingNusantara.ipa
+          xattr -cr Payload/CityBuildingNusantara.app
+          codesign --force --sign - --timestamp=none --generate-entitlement-der Payload/CityBuildingNusantara.app
+          zip -r -y CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
 
       - name: Upload IPA to GitHub Actions Artifacts
