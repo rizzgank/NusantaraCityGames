@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Rizzi Games (RG) - City Building : Nusantara Project
-Automated AppIcon, 3D Model (.obj), 2K PBR Texture (.png), Topographic Heightmap,
-and 44.1kHz Stereo Audio Generator for GitHub Actions iOS Build.
+Automated AppIcon, 3D Model (.obj), HD PBR Texture (.png), Topographic Heightmap,
+and Stereo Audio Generator for GitHub Actions iOS Build (100MB+ Target).
 """
 
 import os
@@ -29,7 +29,7 @@ def ensure_dirs():
 
 
 # ==============================================================================
-# 0. iOS HOME SCREEN APP ICON GENERATOR (REQUIRED BY iOS INSTALLD & ESIGN)
+# 0. iOS HOME SCREEN APP ICON GENERATOR
 # ==============================================================================
 
 def generate_app_icon():
@@ -38,7 +38,6 @@ def generate_app_icon():
     img = Image.new("RGB", (size, size), (14, 24, 48))
     draw = ImageDraw.Draw(img)
 
-    # Cozy Sunset-to-Night Sky Gradient
     for y in range(size):
         t = y / float(size)
         r = int(18 * (1 - t) + 235 * (t ** 1.8) * 0.55)
@@ -46,14 +45,10 @@ def generate_app_icon():
         b = int(68 * (1 - t) + 64 * (t ** 1.4) * 0.45)
         draw.line([(0, y), (size, y)], fill=(min(255, r), min(255, g), min(255, b)))
 
-    # Glowing Golden Moon / Sun
     draw.ellipse([650, 140, 860, 350], fill=(255, 214, 102))
-
-    # Gunung Arjuno Mountain Silhouette
     draw.polygon([(0, 740), (310, 420), (620, 740)], fill=(26, 44, 68))
     draw.polygon([(420, 740), (760, 460), (1024, 740)], fill=(20, 36, 58))
 
-    # City Skyline Towers with Cozy Warm Windows
     towers = [
         (90, 470, 230, 920),
         (255, 360, 425, 920),
@@ -68,7 +63,6 @@ def generate_app_icon():
                 if (wx + wy) % 3 != 0:
                     draw.rectangle([wx, wy, wx + 18, wy + 24], fill=(255, 206, 94))
 
-    # Foreground Emerald Nusantara Hills & Road
     draw.rectangle([0, 860, 1024, 1024], fill=(32, 38, 46))
     draw.rectangle([0, 928, 1024, 944], fill=(245, 195, 45))
 
@@ -92,10 +86,10 @@ def generate_app_icon():
 
 
 # ==============================================================================
-# 1. MULTI-OCTAVE ORGANIC NOISE & 2K PBR TEXTURE GENERATOR (2048x2048)
+# 1. HD PBR TEXTURE GENERATOR (1536x1536 -> ~115MB Total IPA)
 # ==============================================================================
 
-def fbm_noise(size: int, octaves=(8, 32, 128, 512), weights=(0.45, 0.30, 0.15, 0.10)) -> np.ndarray:
+def fbm_noise(size: int, octaves=(8, 32, 128, 384), weights=(0.45, 0.30, 0.15, 0.10)) -> np.ndarray:
     acc = np.zeros((size, size), dtype=np.float32)
     for grid, w in zip(octaves, weights):
         base = RNG.random((grid, grid), dtype=np.float32)
@@ -125,10 +119,10 @@ def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) ->
 
 
 def generate_all_textures():
-    print("[1/4] Generating 2K (2048x2048) PBR Textures...")
-    S = 2048
+    print("[1/4] Generating HD (1536x1536) PBR Textures...")
+    S = 1536
     n_base = fbm_noise(S)
-    n_fine = fbm_noise(S, octaves=(32, 128, 512, 1024), weights=(0.2, 0.3, 0.3, 0.2))
+    n_fine = fbm_noise(S, octaves=(24, 96, 384, 768), weights=(0.2, 0.3, 0.3, 0.2))
 
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
     asphalt[..., 0] = 36 + n_base * 22 + n_fine * 14
@@ -141,27 +135,27 @@ def generate_all_textures():
     save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"), micro_grain=14)
 
     road_1w2l = asphalt.copy()
-    road_1w2l[:, 40:75] = [235, 235, 230]
-    road_1w2l[:, S - 75:S - 40] = [235, 235, 230]
-    for y in range(0, S, 256):
-        road_1w2l[y:y + 130, S // 2 - 16:S // 2 + 16] = [245, 245, 240]
+    road_1w2l[:, 30:56] = [235, 235, 230]
+    road_1w2l[:, S - 56:S - 30] = [235, 235, 230]
+    for y in range(0, S, 192):
+        road_1w2l[y:y + 96, S // 2 - 12:S // 2 + 12] = [245, 245, 240]
     save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"), micro_grain=16)
 
     road_2w4l = asphalt.copy()
-    road_2w4l[:, 36:68] = [235, 235, 230]
-    road_2w4l[:, S - 68:S - 36] = [235, 235, 230]
-    road_2w4l[:, S // 2 - 26:S // 2 - 8] = [240, 185, 30]
-    road_2w4l[:, S // 2 + 8:S // 2 + 26] = [240, 185, 30]
-    for y in range(0, S, 256):
-        road_2w4l[y:y + 128, S // 4 - 12:S // 4 + 12] = [240, 240, 235]
-        road_2w4l[y:y + 128, (3 * S) // 4 - 12:(3 * S) // 4 + 12] = [240, 240, 235]
+    road_2w4l[:, 28:52] = [235, 235, 230]
+    road_2w4l[:, S - 52:S - 28] = [235, 235, 230]
+    road_2w4l[:, S // 2 - 20:S // 2 - 6] = [240, 185, 30]
+    road_2w4l[:, S // 2 + 6:S // 2 + 20] = [240, 185, 30]
+    for y in range(0, S, 192):
+        road_2w4l[y:y + 96, S // 4 - 9:S // 4 + 9] = [240, 240, 235]
+        road_2w4l[y:y + 96, (3 * S) // 4 - 9:(3 * S) // 4 + 9] = [240, 240, 235]
     save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"), micro_grain=16)
 
     yy, xx = np.mgrid[0:S, 0:S]
-    tile_x = (xx // 64) % 2
-    tile_y = (yy // 64) % 2
+    tile_x = (xx // 48) % 2
+    tile_y = (yy // 48) % 2
     checker = (tile_x ^ tile_y).astype(np.float32)
-    grout = ((xx % 64 < 4) | (yy % 64 < 4)).astype(np.float32)
+    grout = ((xx % 48 < 3) | (yy % 48 < 3)).astype(np.float32)
     paving = np.zeros((S, S, 3), dtype=np.float32)
     paving[..., 0] = np.where(checker > 0, 168, 128) + n_fine * 24 - grout * 55
     paving[..., 1] = np.where(checker > 0, 82, 126) + n_fine * 20 - grout * 55
@@ -174,8 +168,8 @@ def generate_all_textures():
     bikelane[..., 0] = 34 + n_fine * 20
     bikelane[..., 1] = 138 + n_fine * 28
     bikelane[..., 2] = 74 + n_fine * 20
-    bikelane[:, 24:52] = [245, 245, 245]
-    bikelane[:, S - 52:S - 24] = [245, 245, 245]
+    bikelane[:, 18:40] = [245, 245, 245]
+    bikelane[:, S - 40:S - 18] = [245, 245, 245]
     save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"), micro_grain=16)
 
     grass = np.zeros((S, S, 3), dtype=np.float32)
@@ -205,10 +199,10 @@ def generate_all_textures():
     tabebuya[..., 2] = np.where(blossom_mask > 0, 196, 48) + n_fine * 18
     save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"), micro_grain=22)
 
-    win_x = (xx % 128 >= 24) & (xx % 128 <= 104)
-    win_y = (yy % 128 >= 28) & (yy % 128 <= 100)
+    win_x = (xx % 96 >= 18) & (xx % 96 <= 78)
+    win_y = (yy % 96 >= 20) & (yy % 96 <= 76)
     is_window = win_x & win_y
-    cell_id = (xx // 128) * 31 + (yy // 128) * 17
+    cell_id = (xx // 96) * 31 + (yy // 96) * 17
     lit_mask = is_window & ((cell_id % 5) != 0)
 
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
@@ -224,7 +218,7 @@ def generate_all_textures():
     facade_night[..., 2] = np.where(lit_mask, np.where(warm_tone == 0, 128, 92), 18)
     save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=12)
 
-    stripe = (xx // 256) % 5
+    stripe = (xx // 192) % 5
     palette = np.array([
         [235, 68, 74],
         [248, 196, 42],
@@ -237,10 +231,10 @@ def generate_all_textures():
     save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=16)
 
     indo = np.full((S, S, 3), [242, 244, 248], dtype=np.float32)
-    indo[0:220, :] = [218, 37, 29]
-    indo[220:340, :] = [0, 91, 170]
-    indo[340:410, :] = [255, 204, 0]
-    indo[700:1850, 180:1868] = [48, 76, 108]
+    indo[0:165, :] = [218, 37, 29]
+    indo[165:255, :] = [0, 91, 170]
+    indo[255:310, :] = [255, 204, 0]
+    indo[525:1390, 135:1400] = [48, 76, 108]
     save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=14)
 
 
@@ -566,10 +560,10 @@ def generate_nusantara_maps():
 
 
 # ==============================================================================
-# 4. 44.1kHz STEREO AMBIENT & COZY NIGHT CITY AUDIO GENERATOR (.WAV)
+# 4. STEREO AMBIENT & COZY NIGHT CITY AUDIO GENERATOR (.WAV)
 # ==============================================================================
 
-def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 44100):
+def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 32000):
     stereo = np.stack([np.clip(left, -1.0, 1.0), np.clip(right, -1.0, 1.0)], axis=-1)
     pcm = (stereo * 32767.0).astype(np.int16)
     with wave.open(path, "wb") as wf:
@@ -580,8 +574,8 @@ def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 4
 
 
 def generate_all_audio():
-    print("[4/4] Generating 44.1kHz Stereo City & Cozy Night Audio (.wav)...")
-    sr = 44100
+    print("[4/4] Generating Stereo City & Cozy Night Audio (.wav)...")
+    sr = 32000
 
     t = np.linspace(0, 32.0, sr * 32, endpoint=False, dtype=np.float32)
     chords = [
