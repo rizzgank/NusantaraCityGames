@@ -1,43 +1,30 @@
 name: CityBuildingNusantara
 options:
-  bundleIdPrefix: com.rizzigames
+  bundleIdPrefix: com.nusantara
   deploymentTarget:
     iOS: "15.0"
-  createIntermediateGroups: true
-
-settings:
-  base:
-    PRODUCT_NAME: CityBuildingNusantara
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
-    SWIFT_VERSION: "5.9"
-    TARGETED_DEVICE_FAMILY: "1"
-    CODE_SIGN_IDENTITY: ""
-    CODE_SIGNING_REQUIRED: "NO"
-    CODE_SIGNING_ALLOWED: "NO"
-    ENABLE_BITCODE: "NO"
-    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
-
 targets:
   CityBuildingNusantara:
     type: application
     platform: iOS
-    deploymentTarget: "15.0"
     sources:
       - path: Sources
-      - path: Assets.xcassets
       - path: Resources
         type: folder
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.rizzigames.nusantaracity3d
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.nusantara.citybuilding3d
+        PRODUCT_NAME: CityBuildingNusantara
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "City Building Nusantara"
-        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.simulation-games"
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "NO"
-        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
+        INFOPLIST_KEY_UIStatusBarHidden: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_UIRequiresFullScreen: "YES"
-        INFOPLIST_KEY_UIStatusBarHidden: "YES"
-        INFOPLIST_KEY_LSRequiresIPhoneOS: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
