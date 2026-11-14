@@ -41,54 +41,64 @@ final class GameViewModel: ObservableObject {
     @Published var waterSupply: Int = 0
     @Published var waterDemand: Int = 0
 
-    @Published var rDemand: Double = 0.75
+    @Published var rDemand: Double = 0.80
     @Published var cDemand: Double = 0.50
     @Published var iDemand: Double = 0.45
 
     @Published var isNight: Bool = false
     @Published var isMuted: Bool = false
     @Published var hideHUDForPhoto: Bool = false
+    @Published var touchToolMode: TouchToolMode = .buildBrush
     @Published var cameraMode: CameraMode = .drone
     @Published var lensMode: DataLensMode = .normal
 
     @Published var activeCategory: BuildCategory = .roads
-    @Published var selRoad: RoadKind = .fourLane
-    @Published var selZone: ZoneKind = .residentialSingle
+    @Published var selRoad: RoadKind = .twoLane
+    @Published var selZoneBrush: ZoneBrushKind = .residentialLow
     @Published var selFacility: FacilityKind = .balaiKota
     @Published var selUtility: UtilityKind = .garduListrik
 
     @Published var roads: [GridCoord: RoadTile] = [:]
-    @Published var zones: [GridCoord: ZoneTile] = [:]
+    @Published var plots: [GridCoord: ZonedPlot] = [:]
     @Published var facilities: [GridCoord: FacilityTile] = [:]
     @Published var utilities: [GridCoord: UtilityTile] = [:]
     @Published var activeGebrakans: Set<GebrakanKind> = []
 
     @Published var settings = GameSettings()
     @Published var inspectCard: InspectCardData? = nil
-    @Published var aiAgentMessage: String = "Halo Pak Wali! Bangun jalan raya, gardu listrik & perumahan agar warga mulai pindah masuk."
+    @Published var dragCostPreview: String? = nil
+    @Published var aiAgentMessage: String = "Tarik garis jalan di tanah, lalu sapukan Kuas Zona (Hijau/Biru/Kuning) di pinggir jalan!"
     @Published var accidentCoord: GridCoord? = nil
     @Published var toast: String? = nil
 
+    private var dragStartCoord: GridCoord? = nil
+    private var dragCurrentCoords: [GridCoord] = []
     private var undoStack: [UndoAction] = []
-    private var elasticCurveCount: Int = 0
     let engine = City3DEngine()
     private var simTimer: Timer?
 
     init() {
         engine.onTileTapped = { [weak self] coord in
-            Task { @MainActor [weak self] in
-                self?.handleTap(coord)
-            }
+            Task { @MainActor [weak self] in self?.handleSingleTap(coord) }
+        }
+        engine.onDragBegan = { [weak self] coord in
+            Task { @MainActor [weak self] in self?.handleDragBegan(coord) }
+        }
+        engine.onDragMoved = { [weak self] coord in
+            Task { @MainActor [weak self] in self?.handleDragMoved(coord) }
+        }
+        engine.onDragEnded = { [weak self] coord in
+            Task { @MainActor [weak self] in self?.handleDragEnded(coord) }
         }
         startSplashSequence()
     }
 
     func startSplashSequence() {
         screen = .splashTitle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self, self.screen == .splashTitle else { return }
             self.screen = .splashStudio
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.screen == .splashStudio else { return }
                 self.enterMainMenu()
             }
@@ -105,24 +115,24 @@ final class GameViewModel: ObservableObject {
     }
 
     func startCity() {
-        roads.removeAll(); zones.removeAll(); facilities.removeAll(); utilities.removeAll()
+        roads.removeAll(); plots.removeAll(); facilities.removeAll(); utilities.removeAll()
         activeGebrakans.removeAll(); undoStack.removeAll()
         accidentCoord = nil; inspectCard = nil; hideHUDForPhoto = false
         population = 0; educationIndex = 0; happiness = 85
         budgetIDR = selectedMode == .sandbox ? 999_999_999_999_999 : 150_000_000_000
 
         engine.loadMap(selectedMap, showcaseDemo: false)
-        engine.applyAtmosphere(shadows: settings.hdShadows, fog: settings.atmosphericFog)
+        engine.applyAtmosphere(shadows: settings.hdShadows, fog: settings.atmosphericFog, bloom: settings.hdrBloom)
         engine.cameraSensitivity = settings.cameraSensitivity
         screen = .inGame
-        aiAgentMessage = "Selamat datang di \(selectedMap.title)! Rumah baru mulai dari 0 jiwa & terisi bertahap jika ada jalan, listrik & air."
+        aiAgentMessage = "1) Tarik jalan raya di tanah  2) Sapukan Kuas Zona di tepi jalan  3) Rumah otomatis tumbuh & naik Lv 1→5!"
         startSimulationLoop()
     }
 
     // MARK: - Save & Load Multi-Slot
 
     func slotSnapshot(_ slot: Int) -> CitySaveSnapshot? {
-        guard let data = UserDefaults.standard.data(forKey: "nusantara.slot.\(slot)") else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: "nusantara.v4.slot.\(slot)") else { return nil }
         return try? JSONDecoder().decode(CitySaveSnapshot.self, from: data)
     }
 
@@ -137,14 +147,14 @@ final class GameViewModel: ObservableObject {
             budgetIDR: budgetIDR,
             population: population,
             roads: Array(roads.values),
-            zones: Array(zones.values),
+            plots: Array(plots.values),
             facilities: Array(facilities.values),
             utilities: Array(utilities.values),
             activeGebrakans: Array(activeGebrakans)
         )
         if let encoded = try? JSONEncoder().encode(snap) {
-            UserDefaults.standard.set(encoded, forKey: "nusantara.slot.\(slot)")
-            showToast("Tersimpan di Slot \(slot)!")
+            UserDefaults.standard.set(encoded, forKey: "nusantara.v4.slot.\(slot)")
+            showToast("Kota tersimpan di Slot \(slot)!")
         }
     }
 
@@ -157,47 +167,187 @@ final class GameViewModel: ObservableObject {
         selectedMode = snap.playMode
         budgetIDR = snap.budgetIDR
         roads = Dictionary(uniqueKeysWithValues: snap.roads.map { ($0.coord, $0) })
-        zones = Dictionary(uniqueKeysWithValues: snap.zones.map { ($0.coord, $0) })
+        plots = Dictionary(uniqueKeysWithValues: snap.plots.map { ($0.coord, $0) })
         facilities = Dictionary(uniqueKeysWithValues: snap.facilities.map { ($0.coord, $0) })
         utilities = Dictionary(uniqueKeysWithValues: snap.utilities.map { ($0.coord, $0) })
         activeGebrakans = Set(snap.activeGebrakans)
         undoStack.removeAll()
 
         engine.loadMap(selectedMap, showcaseDemo: false)
-        engine.syncWorld(roads: roads, zones: zones, facilities: facilities, utilities: utilities)
+        syncEngine()
         recalcStats()
         screen = .inGame
         startSimulationLoop()
         showToast("Kota \(selectedMap.title) dari Slot \(slot) dimuat!")
     }
 
-    // MARK: - Interaksi Tanah & Pembangunan
+    // MARK: - Tarik Jalan Geser Jari (Drag-to-Build) & Kuas Zona Otomatis
 
-    func handleTap(_ coord: GridCoord) {
+    private func computeRoadPath(from a: GridCoord, to b: GridCoord) -> [GridCoord] {
+        var result: [GridCoord] = [a]
+        var cx = a.x
+        var cz = a.z
+        while cx != b.x {
+            cx += (b.x > cx) ? 1 : -1
+            result.append(GridCoord(x: cx, z: cz))
+        }
+        while cz != b.z {
+            cz += (b.z > cz) ? 1 : -1
+            result.append(GridCoord(x: cx, z: cz))
+        }
+        return result
+    }
+
+    private func isNearRoad(_ c: GridCoord) -> Bool {
+        for dz in -3...3 {
+            for dx in -3...3 {
+                if abs(dx) + abs(dz) <= 3 {
+                    if let r = roads[GridCoord(x: c.x + dx, z: c.z + dz)], r.kind.isDriveable {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    func handleDragBegan(_ coord: GridCoord) {
+        guard screen == .inGame else { return }
+        dragStartCoord = coord
+        dragCurrentCoords = [coord]
+        updatePreviewOverlay()
+    }
+
+    func handleDragMoved(_ coord: GridCoord) {
+        guard screen == .inGame, let start = dragStartCoord else { return }
+        if activeCategory == .roads {
+            dragCurrentCoords = computeRoadPath(from: start, to: coord)
+        } else if activeCategory == .zoning {
+            if !dragCurrentCoords.contains(coord) {
+                dragCurrentCoords.append(coord)
+            }
+        } else {
+            dragCurrentCoords = [coord]
+        }
+        updatePreviewOverlay()
+    }
+
+    func handleDragEnded(_ coord: GridCoord) {
+        guard screen == .inGame else { return }
+        let targets = dragCurrentCoords.isEmpty ? [coord] : dragCurrentCoords
+        dragStartCoord = nil
+        dragCurrentCoords = []
+        dragCostPreview = nil
+        engine.updateDragPreview(coords: [], isValid: true, tint: .cyan)
+
+        if activeCategory == .roads {
+            commitBatchRoads(targets)
+        } else if activeCategory == .zoning {
+            commitBatchZones(targets)
+        } else {
+            handleSingleTap(coord)
+        }
+    }
+
+    private func updatePreviewOverlay() {
+        guard !dragCurrentCoords.isEmpty else { return }
+        if activeCategory == .roads {
+            let validCoords = dragCurrentCoords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil }
+            let totalCost = Int64(validCoords.count) * selRoad.costIDR
+            dragCostPreview = "\(validCoords.count) Petak Jalan • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(totalCost))"
+            engine.updateDragPreview(coords: dragCurrentCoords, isValid: validCoords.count == dragCurrentCoords.count, tint: .cyan)
+        } else if activeCategory == .zoning {
+            let validCoords = dragCurrentCoords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && isNearRoad($0) }
+            let totalCost = Int64(validCoords.count) * selZoneBrush.costIDR
+            dragCostPreview = "\(selZoneBrush.title) (\(validCoords.count) Petak) • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(totalCost))"
+            let tint: UIColor = selZoneBrush == .commercial ? .systemBlue : (selZoneBrush == .industrialOffice ? .systemYellow : .systemGreen)
+            engine.updateDragPreview(coords: dragCurrentCoords, isValid: !validCoords.isEmpty, tint: tint)
+        }
+    }
+
+    private func commitBatchRoads(_ coords: [GridCoord]) {
+        let valid = coords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && roads[$0] == nil }
+        guard !valid.isEmpty else {
+            showToast("Lahan sudah terisi bangunan.")
+            return
+        }
+        let totalCost = Int64(valid.count) * selRoad.costIDR
+        guard spend(totalCost) else { return }
+
+        for (idx, c) in valid.enumerated() {
+            let yaw: Float = selRoad == .elasticCurve ? Float(idx % 4) * 0.25 : 0.0
+            roads[c] = RoadTile(coord: c, kind: selRoad, curveYaw: yaw)
+            if accidentCoord == c {
+                accidentCoord = nil
+                engine.showAccidentMarker(at: nil)
+            }
+        }
+        undoStack.append(.placedBatchRoads(valid, totalCost))
+        syncEngine()
+        NusantaraAssetBank.shared.playBuildSFX()
+        recalcStats()
+    }
+
+    private func commitBatchZones(_ coords: [GridCoord]) {
+        if selZoneBrush == .clearZone {
+            var cleared = 0
+            for c in coords {
+                if plots.removeValue(forKey: c) != nil { cleared += 1 }
+            }
+            if cleared > 0 {
+                syncEngine()
+                recalcStats()
+                showToast("Cat zona dihapus dari \(cleared) petak.")
+            }
+            return
+        }
+
+        let valid = coords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && plots[$0] == nil && isNearRoad($0) }
+        guard !valid.isEmpty else {
+            showToast("Sapukan Kuas Zona pada petak biru di tepi jalan!")
+            return
+        }
+        let totalCost = Int64(valid.count) * selZoneBrush.costIDR
+        guard spend(totalCost) else { return }
+
+        for c in valid {
+            let startLv = selZoneBrush == .parkGreen ? 1 : 0 // 0 = Mulai dengan Scaffolding Konstruksi!
+            let cap = selZoneBrush.capacity(forLevel: max(1, startLv))
+            plots[c] = ZonedPlot(coord: c, kind: selZoneBrush, buildingLevel: startLv, residents: 0, maxResidents: cap)
+        }
+        undoStack.append(.placedBatchZones(valid, totalCost))
+        syncEngine()
+        NusantaraAssetBank.shared.playBuildSFX()
+        recalcStats()
+    }
+
+    func handleSingleTap(_ coord: GridCoord) {
         guard screen == .inGame else { return }
 
-        // Jika mengetuk bangunan/rumah yang sudah ada saat tidak menghapus, tampilkan kartu inspeksi!
+        // Tap-to-Inspect bangunan yang sudah berdiri
         if activeCategory != .bulldoze {
-            if let z = zones[coord] {
+            if let p = plots[coord] {
+                let stageText = p.buildingLevel == 0 ? "Sedang Konstruksi (Scaffolding)" : "Level \(p.buildingLevel) / 5"
                 inspectCard = InspectCardData(
-                    title: z.kind.title,
-                    subtitle: "Koordinat (\(coord.x), \(coord.z))",
+                    title: p.kind.title,
+                    subtitle: "\(stageText) • Koordinat (\(coord.x), \(coord.z))",
                     details: [
-                        "Penghuni Riil: \(z.residents) / \(z.maxResidents) Jiwa",
-                        "Listrik: \(z.hasPower ? "Menyala" : "Byarpet (Kurang Daya)")",
-                        "Air Bersih PDAM: \(z.hasWater ? "Tersedia" : "Kering")",
-                        "Pajak Bulanan: \(IDRFormat.string(z.kind.monthlyTaxIDR))"
+                        "Penghuni Riil: \(p.residents) / \(p.maxResidents) Jiwa",
+                        "Arsitektur: \(p.buildingLevel >= 3 ? "Bangunan Bertingkat / Modern" : "Bangunan Dasar")",
+                        "Listrik: \(p.hasPower ? "Menyala" : "Byarpet (Kurang Daya)")",
+                        "Air Bersih PDAM: \(p.hasWater ? "Tersedia" : "Kering")",
+                        "Pajak Bulanan: \(IDRFormat.string(p.kind.monthlyTaxIDR(level: p.buildingLevel)))"
                     ]
                 )
                 return
             } else if let f = facilities[coord] {
                 inspectCard = InspectCardData(
                     title: f.kind.title,
-                    subtitle: "Fasilitas Publik Kota",
+                    subtitle: "Fasilitas Publik & Pendidikan",
                     details: [
                         "Status: Beroperasi Penuh",
-                        "Kontribusi Pendidikan: +\(f.kind.educationScore)%",
-                        "Radius Layanan: Aktif"
+                        "Indeks Pendidikan: +\(f.kind.educationScore)%",
+                        "Mendorong Rumah Sekitar Naik Level 3–5"
                     ]
                 )
                 return
@@ -208,61 +358,38 @@ final class GameViewModel: ObservableObject {
 
         switch activeCategory {
         case .roads:
-            guard zones[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
-                showToast("Petak terisi bangunan.")
-                return
-            }
-            guard spend(selRoad.costIDR) else { return }
-            var yaw: Float = 0.0
-            if selRoad == .elasticCurve {
-                elasticCurveCount += 1
-                yaw = Float(elasticCurveCount % 6) * 0.26
-            }
-            roads[coord] = RoadTile(coord: coord, kind: selRoad, curveYaw: yaw)
-            undoStack.append(.placedRoad(coord, selRoad.costIDR))
-            if accidentCoord == coord {
-                accidentCoord = nil
-                engine.showAccidentMarker(at: nil)
-            }
+            commitBatchRoads([coord])
 
-        case .zones:
-            guard roads[coord] == nil && zones[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
-                showToast("Pilih lahan kosong!")
-                return
-            }
-            guard spend(selZone.costIDR) else { return }
-            let cap = selZone.maxCapacity > 0 ? Int.random(in: max(2, selZone.maxCapacity - 2)...selZone.maxCapacity) : 0
-            // Mulai dari 0 penghuni agar tumbuh secara logis & bertahap!
-            zones[coord] = ZoneTile(coord: coord, kind: selZone, residents: 0, maxResidents: cap)
-            undoStack.append(.placedZone(coord, selZone.costIDR))
+        case .zoning:
+            commitBatchZones([coord])
 
         case .facilities:
-            guard roads[coord] == nil && zones[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
+            guard roads[coord] == nil && plots[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
                 showToast("Pilih lahan kosong untuk \(selFacility.title).")
                 return
             }
             guard spend(selFacility.costIDR) else { return }
             facilities[coord] = FacilityTile(coord: coord, kind: selFacility)
             undoStack.append(.placedFacility(coord, selFacility.costIDR))
-            aiAgentMessage = "\(selFacility.title) selesai dibangun dan mulai melayani masyarakat."
+            aiAgentMessage = "\(selFacility.title) beroperasi! Rumah warga sekitar kini bisa berkembang ke Level 3–5."
 
         case .utilities:
-            guard roads[coord] == nil && zones[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
+            guard roads[coord] == nil && plots[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
                 showToast("Pilih lahan kosong untuk \(selUtility.title).")
                 return
             }
             guard spend(selUtility.costIDR) else { return }
             utilities[coord] = UtilityTile(coord: coord, kind: selUtility)
             undoStack.append(.placedUtility(coord, selUtility.costIDR))
-            aiAgentMessage = "\(selUtility.title) aktif menyuplai jaringan kota!"
+            aiAgentMessage = "\(selUtility.title) aktif menyuplai jaringan utilitas kota!"
 
         case .gebrakans:
-            showToast("Pilih kartu Gebrakan di panel bawah untuk mengaktifkannya.")
+            showToast("Pilih kartu Gebrakan di dock bawah untuk mengaktifkannya.")
             return
 
         case .bulldoze:
             let removed = (roads.removeValue(forKey: coord) != nil) ||
-                          (zones.removeValue(forKey: coord) != nil) ||
+                          (plots.removeValue(forKey: coord) != nil) ||
                           (facilities.removeValue(forKey: coord) != nil) ||
                           (utilities.removeValue(forKey: coord) != nil)
             if removed {
@@ -274,9 +401,25 @@ final class GameViewModel: ObservableObject {
             }
         }
 
-        engine.syncWorld(roads: roads, zones: zones, facilities: facilities, utilities: utilities)
+        syncEngine()
         NusantaraAssetBank.shared.playBuildSFX()
         recalcStats()
+    }
+
+    func selectCategory(_ cat: BuildCategory) {
+        activeCategory = cat
+        touchToolMode = .buildBrush
+        syncEngine()
+    }
+
+    private func syncEngine() {
+        engine.syncWorld(
+            roads: roads,
+            plots: plots,
+            facilities: facilities,
+            utilities: utilities,
+            showZonableGrid: activeCategory == .zoning
+        )
     }
 
     func undoLastBuild() {
@@ -285,11 +428,11 @@ final class GameViewModel: ObservableObject {
             return
         }
         switch last {
-        case .placedRoad(let c, let cost):
-            roads.removeValue(forKey: c)
+        case .placedBatchRoads(let cs, let cost):
+            cs.forEach { roads.removeValue(forKey: $0) }
             if selectedMode == .real { budgetIDR += cost }
-        case .placedZone(let c, let cost):
-            zones.removeValue(forKey: c)
+        case .placedBatchZones(let cs, let cost):
+            cs.forEach { plots.removeValue(forKey: $0) }
             if selectedMode == .real { budgetIDR += cost }
         case .placedFacility(let c, let cost):
             facilities.removeValue(forKey: c)
@@ -298,7 +441,7 @@ final class GameViewModel: ObservableObject {
             utilities.removeValue(forKey: c)
             if selectedMode == .real { budgetIDR += cost }
         }
-        engine.syncWorld(roads: roads, zones: zones, facilities: facilities, utilities: utilities)
+        syncEngine()
         recalcStats()
         showToast("Pembangunan terakhir dibatalkan (APBD dikembalikan).")
     }
@@ -325,27 +468,27 @@ final class GameViewModel: ObservableObject {
         return true
     }
 
-    // MARK: - Simulasi Populasi Organik, Utilitas Listrik-Air & Kecelakaan
+    // MARK: - Simulasi Cities: Skylines (Konstruksi Scaffolding, Naik Level 1->5 Otomatis & Populasi Organik)
 
     private func recalcStats() {
-        let pSup = utilities.values.filter { $0.kind == .garduListrik }.count * 60
-        let wSup = utilities.values.filter { $0.kind == .menaraPDAM }.count * 60
+        let pSup = utilities.values.filter { $0.kind == .garduListrik }.count * 80
+        let wSup = utilities.values.filter { $0.kind == .menaraPDAM }.count * 80
         var pDem = 0
         var wDem = 0
         var pop = 0
         var jobs = 0
         var parkBonus = 0
 
-        for key in zones.keys {
-            guard var z = zones[key] else { continue }
-            pDem += z.kind.powerNeed
-            wDem += z.kind.waterNeed
-            z.hasPower = selectedMode == .sandbox || pSup >= pDem
-            z.hasWater = selectedMode == .sandbox || wSup >= wDem
-            zones[key] = z
-            pop += z.residents
-            jobs += z.kind.jobSlots
-            if z.kind == .park { parkBonus += 3 }
+        for key in plots.keys {
+            guard var p = plots[key] else { continue }
+            pDem += p.kind.powerNeed
+            wDem += p.kind.waterNeed
+            p.hasPower = selectedMode == .sandbox || pSup >= pDem
+            p.hasWater = selectedMode == .sandbox || wSup >= wDem
+            plots[key] = p
+            pop += p.residents
+            jobs += p.kind.jobSlots(forLevel: max(1, p.buildingLevel))
+            if p.kind == .parkGreen { parkBonus += 3 }
         }
 
         powerSupply = pSup; powerDemand = pDem
@@ -362,64 +505,79 @@ final class GameViewModel: ObservableObject {
         let utilityPenalty = (pDem > pSup || wDem > wSup) && selectedMode == .real ? 10 : 0
         happiness = min(100, max(20, 82 + parkBonus + gebBonus - accidentPenalty - utilityPenalty))
 
-        // Update indikator permintaan RCI
-        rDemand = jobs > pop ? 0.85 : 0.45
-        cDemand = pop > jobs ? 0.80 : 0.35
-        iDemand = pop > (jobs / 2) ? 0.75 : 0.30
+        rDemand = jobs >= pop ? 0.85 : 0.45
+        cDemand = pop > jobs ? 0.82 : 0.35
+        iDemand = pop > (jobs / 2) ? 0.78 : 0.30
     }
 
     private func startSimulationLoop() {
         simTimer?.invalidate()
-        simTimer = Timer.scheduledTimer(withTimeInterval: 5.5, repeats: true) { [weak self] _ in
+        simTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.screen == .inGame else { return }
 
-                // 1. Pertumbuhan populasi organik bertahap (tidak instan & tergantung jalan, listrik, air)
-                var changed = false
-                for key in self.zones.keys {
-                    guard var z = self.zones[key], z.maxResidents > 0 else { continue }
-                    let hasRoad = self.roads[GridCoord(x: z.coord.x + 1, z: z.coord.z)] != nil ||
-                                  self.roads[GridCoord(x: z.coord.x - 1, z: z.coord.z)] != nil ||
-                                  self.roads[GridCoord(x: z.coord.x, z: z.coord.z + 1)] != nil ||
-                                  self.roads[GridCoord(x: z.coord.x, z: z.coord.z - 1)] != nil
+                var visualChanged = false
+                let maxAllowedLevel = min(5, 1 + (self.educationIndex / 22) + (self.happiness >= 85 ? 1 : 0))
 
-                    if hasRoad && z.hasPower && z.hasWater && z.residents < z.maxResidents {
-                        z.residents = min(z.maxResidents, z.residents + Int.random(in: 1...2))
-                        self.zones[key] = z
-                        changed = true
-                    } else if (!hasRoad || !z.hasPower || !z.hasWater) && z.residents > 0 {
-                        z.residents = max(0, z.residents - 1)
-                        self.zones[key] = z
-                        changed = true
+                for key in self.plots.keys {
+                    guard var p = self.plots[key], p.kind != .parkGreen else { continue }
+                    let connected = self.isNearRoad(p.coord)
+
+                    if connected && p.hasPower && p.hasWater {
+                        p.isAbandoned = false
+                        if p.buildingLevel == 0 {
+                            // Selesai tahap konstruksi scaffolding -> Jadi Bangunan Level 1!
+                            p.buildingLevel = 1
+                            p.maxResidents = p.kind.capacity(forLevel: 1)
+                            visualChanged = true
+                        } else if p.residents < p.maxResidents {
+                            // Warga pindah masuk secara bertahap
+                            p.residents = min(p.maxResidents, p.residents + Int.random(in: 1...2))
+                        } else if p.residents >= p.maxResidents && p.buildingLevel < maxAllowedLevel {
+                            // Bangunan penuh & layanan bagus -> Warga renovasi naik tingkat (Level 1 -> 5)!
+                            p.buildingLevel += 1
+                            p.maxResidents = p.kind.capacity(forLevel: p.buildingLevel)
+                            visualChanged = true
+                        }
+                    } else {
+                        // Tanpa jalan / listrik / air -> Penghuni keluar & gedung terbengkalai
+                        if p.residents > 0 {
+                            p.residents = max(0, p.residents - 1)
+                        } else if p.buildingLevel > 0 && !p.isAbandoned {
+                            p.isAbandoned = true
+                            visualChanged = true
+                        }
                     }
+                    self.plots[key] = p
                 }
 
-                // 2. Pajak riil dari warga yang sudah menghuni bangunan
+                // Pajak riil sesuai okupansi & level bangunan
                 if self.selectedMode == .real {
                     let mult: Double = self.activeGebrakans.contains(.digitalUmkm) ? 1.25 : 1.0
-                    let tax = self.zones.values.reduce(Int64(0)) { acc, z in
-                        let occupancyRatio = z.maxResidents > 0 ? Double(z.residents) / Double(z.maxResidents) : 1.0
-                        return acc + Int64(Double(z.kind.monthlyTaxIDR) * occupancyRatio * mult)
+                    let tax = self.plots.values.reduce(Int64(0)) { acc, p in
+                        guard p.buildingLevel > 0 && !p.isAbandoned else { return acc }
+                        let ratio = p.maxResidents > 0 ? Double(p.residents) / Double(p.maxResidents) : 1.0
+                        return acc + Int64(Double(p.kind.monthlyTaxIDR(level: p.buildingLevel)) * ratio * mult)
                     }
                     self.budgetIDR += tax
                 }
 
-                // 3. Kejadian kecelakaan lalu lintas & respon RSUD/Polisi
-                let hasEmergencyService = self.facilities.values.contains { $0.kind == .kantorPolisi || $0.kind == .rsud }
-                if self.accidentCoord == nil, self.roads.count >= 6, !hasEmergencyService, let r = self.roads.values.randomElement() {
+                // Insiden kecelakaan lalu lintas & respon darurat
+                let hasEmergency = self.facilities.values.contains { $0.kind == .kantorPolisi || $0.kind == .rsud }
+                if self.accidentCoord == nil, self.roads.count >= 7, !hasEmergency, let r = self.roads.values.randomElement() {
                     self.accidentCoord = r.coord
                     self.engine.showAccidentMarker(at: r.coord)
                     self.aiAgentMessage = "DARURAT! Kecelakaan lalu lintas di (\(r.coord.x), \(r.coord.z)). Bangun RSUD / Kantor Polisi!"
-                } else if self.accidentCoord != nil && hasEmergencyService {
+                } else if self.accidentCoord != nil && hasEmergency {
                     self.accidentCoord = nil
                     self.engine.showAccidentMarker(at: nil)
-                    self.aiAgentMessage = "Ambulans RSUD & Polisi berhasil mengevakuasi kecelakaan lalu lintas!"
+                    self.aiAgentMessage = "Ambulans RSUD & Polisi mengevakuasi kecelakaan lalu lintas!"
                 } else if self.powerDemand > self.powerSupply && self.selectedMode == .real {
-                    self.aiAgentMessage = "Peringatan Byarpet! Daya listrik kurang (\(self.powerSupply)/\(self.powerDemand) MW). Bangun Gardu Induk!"
+                    self.aiAgentMessage = "Byarpet! Daya listrik kurang (\(self.powerSupply)/\(self.powerDemand) MW). Bangun Gardu Induk!"
                 }
 
-                if changed {
-                    self.engine.syncWorld(roads: self.roads, zones: self.zones, facilities: self.facilities, utilities: self.utilities)
+                if visualChanged {
+                    self.syncEngine()
                 }
                 self.recalcStats()
             }
@@ -428,12 +586,7 @@ final class GameViewModel: ObservableObject {
 
     func toggleNight() {
         isNight = engine.toggleNightMode()
-        engine.syncWorld(roads: roads, zones: zones, facilities: facilities, utilities: utilities)
-    }
-
-    func toggleMute() {
-        isMuted.toggle()
-        NusantaraAssetBank.shared.isMuted = isMuted
+        syncEngine()
     }
 
     func switchCameraMode(_ mode: CameraMode) {
@@ -450,7 +603,7 @@ final class GameViewModel: ObservableObject {
         if let idx = all.firstIndex(of: lensMode) {
             lensMode = all[(idx + 1) % all.count]
             engine.setLensMode(lensMode)
-            showToast("Mode Lensa: \(lensMode.title)")
+            showToast("Info View: \(lensMode.title)")
         }
     }
 
@@ -462,7 +615,7 @@ final class GameViewModel: ObservableObject {
     }
 }
 
-// MARK: - Antarmuka Pengguna (Splash, Menu Utama 4 Tombol, Alur Bertingkat, HUD HD)
+// MARK: - Antarmuka Pengguna (Splash, Menu Utama 4 Tombol, Alur Bertingkat, HUD Skylines)
 
 struct RootGameView: View {
     @StateObject private var vm = GameViewModel()
@@ -472,7 +625,7 @@ struct RootGameView: View {
             if vm.screen == .splashTitle || vm.screen == .splashStudio {
                 Color(red: 0.04, green: 0.06, blue: 0.12).ignoresSafeArea()
             } else {
-                SceneKitViewport(engine: vm.engine, interactive: vm.screen == .inGame)
+                SceneKitViewport(engine: vm.engine, interactive: vm.screen == .inGame, touchToolMode: vm.touchToolMode)
                     .ignoresSafeArea()
             }
 
@@ -497,7 +650,6 @@ struct RootGameView: View {
         }
     }
 
-    // 1. Animasi Judul Awal
     private var splashTitleView: some View {
         VStack(spacing: 12) {
             Text("NUSANTARA URBAN SIMULATION")
@@ -517,7 +669,6 @@ struct RootGameView: View {
         .onTapGesture { vm.enterMainMenu() }
     }
 
-    // 2. Animasi Logo RG — RIZZI GAMES
     private var splashStudioView: some View {
         VStack(spacing: 14) {
             Text("RG")
@@ -539,7 +690,6 @@ struct RootGameView: View {
         .onTapGesture { vm.enterMainMenu() }
     }
 
-    // 3. Menu Utama (Start, Save Game, Settings, Exit)
     private var mainMenuView: some View {
         HStack {
             VStack(alignment: .leading, spacing: 14) {
@@ -553,18 +703,10 @@ struct RootGameView: View {
 
                 Spacer()
 
-                menuButton(title: "START", icon: "play.fill", primary: true) {
-                    vm.screen = .selectMode
-                }
-                menuButton(title: "SAVE GAME", icon: "folder.fill", primary: false) {
-                    vm.screen = .saveSlots
-                }
-                menuButton(title: "SETTINGS", icon: "gearshape.fill", primary: false) {
-                    vm.screen = .settingsMenu
-                }
-                menuButton(title: "EXIT", icon: "power", primary: false) {
-                    exit(0)
-                }
+                menuButton(title: "START", icon: "play.fill", primary: true) { vm.screen = .selectMode }
+                menuButton(title: "SAVE GAME", icon: "folder.fill", primary: false) { vm.screen = .saveSlots }
+                menuButton(title: "SETTINGS", icon: "gearshape.fill", primary: false) { vm.screen = .settingsMenu }
+                menuButton(title: "EXIT", icon: "power", primary: false) { exit(0) }
             }
             .padding(24)
             .frame(width: 310)
@@ -590,7 +732,6 @@ struct RootGameView: View {
         }
     }
 
-    // 4. Tahap 1 Setelah Start: Pilih Mode Permainan
     private var selectModeView: some View {
         VStack(spacing: 18) {
             Text("TAHAP 1 : PILIH MODE PERMAINAN")
@@ -600,19 +741,14 @@ struct RootGameView: View {
 
             HStack(spacing: 16) {
                 ForEach(PlayMode.allCases) { mode in
-                    Button {
-                        vm.selectedMode = mode
-                    } label: {
+                    Button { vm.selectedMode = mode } label: {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(mode.title)
-                                .font(.title3.bold())
-                            Text(mode.subtitle)
-                                .font(.caption)
-                                .multilineTextAlignment(.leading)
+                            Text(mode.title).font(.title3.bold())
+                            Text(mode.subtitle).font(.caption).multilineTextAlignment(.leading)
                         }
                         .foregroundColor(.white)
                         .padding(18)
-                        .frame(width: 260, height: 135, alignment: .topLeading)
+                        .frame(width: 265, height: 135, alignment: .topLeading)
                         .background(vm.selectedMode == mode ? Color.cyan.opacity(0.35) : Color.black.opacity(0.55))
                         .overlay(RoundedRectangle(cornerRadius: 16).stroke(vm.selectedMode == mode ? Color.cyan : Color.white.opacity(0.2), lineWidth: 2))
                         .cornerRadius(16)
@@ -638,7 +774,6 @@ struct RootGameView: View {
         .cornerRadius(24)
     }
 
-    // 5. Tahap 2 Setelah Start: Pilih Map Nusantara
     private var selectMapView: some View {
         VStack(spacing: 18) {
             Text("TAHAP 2 : PILIH WILAYAH MAP NUSANTARA")
@@ -648,18 +783,11 @@ struct RootGameView: View {
 
             HStack(spacing: 14) {
                 ForEach(CityMapType.allCases) { m in
-                    Button {
-                        vm.selectedMap = m
-                    } label: {
+                    Button { vm.selectedMap = m } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(m.title)
-                                .font(.headline.bold())
-                            Text(m.difficultyLabel)
-                                .font(.caption2.bold())
-                                .foregroundColor(.cyan)
-                            Text(m.subtitle)
-                                .font(.caption)
-                                .multilineTextAlignment(.leading)
+                            Text(m.title).font(.headline.bold())
+                            Text(m.difficultyLabel).font(.caption2.bold()).foregroundColor(.cyan)
+                            Text(m.subtitle).font(.caption).multilineTextAlignment(.leading)
                         }
                         .foregroundColor(.white)
                         .padding(16)
@@ -689,7 +817,6 @@ struct RootGameView: View {
         .cornerRadius(24)
     }
 
-    // 6. Save Game Slots
     private var saveSlotsView: some View {
         VStack(spacing: 16) {
             Text("SAVE GAME SLOTS")
@@ -737,15 +864,15 @@ struct RootGameView: View {
         .cornerRadius(22)
     }
 
-    // 7. Settings Menu
     private var settingsView: some View {
         VStack(spacing: 14) {
-            Text("PENGATURAN GRAFIS & AUDIO")
+            Text("PENGATURAN GRAFIS HD & AUDIO")
                 .font(.headline.bold())
                 .foregroundColor(.cyan)
 
             Toggle("Bayangan Dinamis HD", isOn: $vm.settings.hdShadows)
             Toggle("Kabut Pegunungan & Atmosfer", isOn: $vm.settings.atmosphericFog)
+            Toggle("HDR Bloom City Lights Malam", isOn: $vm.settings.hdrBloom)
 
             HStack {
                 Text("Volume Musik").font(.caption)
@@ -759,7 +886,7 @@ struct RootGameView: View {
             Button("Simpan & Kembali") {
                 NusantaraAssetBank.shared.bgmVolume = vm.settings.bgmVolume
                 vm.engine.cameraSensitivity = vm.settings.cameraSensitivity
-                vm.engine.applyAtmosphere(shadows: vm.settings.hdShadows, fog: vm.settings.atmosphericFog)
+                vm.engine.applyAtmosphere(shadows: vm.settings.hdShadows, fog: vm.settings.atmosphericFog, bloom: vm.settings.hdrBloom)
                 vm.screen = .mainMenu
             }
             .font(.subheadline.bold())
@@ -769,12 +896,11 @@ struct RootGameView: View {
         }
         .foregroundColor(.white)
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 430)
         .background(.ultraThinMaterial)
         .cornerRadius(22)
     }
 
-    // 8. HUD Utama Dalam Game
     private var inGameHUD: some View {
         ZStack {
             if vm.hideHUDForPhoto {
@@ -808,6 +934,17 @@ struct RootGameView: View {
                         statBadge(title: "Bahagia", val: "\(vm.happiness)%", col: .orange)
 
                         Spacer()
+
+                        Button {
+                            vm.touchToolMode = (vm.touchToolMode == .buildBrush) ? .panCamera : .buildBrush
+                        } label: {
+                            Label(vm.touchToolMode.title, systemImage: vm.touchToolMode.icon)
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 7)
+                                .background(vm.touchToolMode == .buildBrush ? Color.cyan.opacity(0.45) : Color.orange.opacity(0.55))
+                                .cornerRadius(9)
+                        }
 
                         Button { vm.cycleLensMode() } label: {
                             Image(systemName: "eye.trianglebadge.exclamationmark")
@@ -844,7 +981,14 @@ struct RootGameView: View {
                     .cornerRadius(9)
                     .padding(.horizontal, 12)
 
-                    if let t = vm.toast {
+                    if let preview = vm.dragCostPreview {
+                        Text(preview)
+                            .font(.caption.bold())
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 14).padding(.vertical, 5)
+                            .background(Color.cyan)
+                            .cornerRadius(12)
+                    } else if let t = vm.toast {
                         Text(t)
                             .font(.caption.bold())
                             .foregroundColor(.white)
@@ -853,7 +997,7 @@ struct RootGameView: View {
                             .cornerRadius(12)
                     }
 
-                    // Tengah: Kartu Inspeksi Warga/Bangunan (kiri) & Kontrol Kamera (kanan)
+                    // Tengah: Kartu Inspeksi Warga/Bangunan & Kontrol Kamera
                     HStack(alignment: .top) {
                         if let card = vm.inspectCard {
                             VStack(alignment: .leading, spacing: 5) {
@@ -870,7 +1014,7 @@ struct RootGameView: View {
                                 }
                             }
                             .padding(12)
-                            .frame(width: 245)
+                            .frame(width: 255)
                             .background(.ultraThinMaterial)
                             .cornerRadius(14)
                             .padding(.leading, 12)
@@ -903,32 +1047,34 @@ struct RootGameView: View {
 
                     Spacer()
 
-                    // Dock Pembangunan Bawah
+                    // Dock Pembangunan Bawah (Tarik Jalan & Kuas Zona Skylines)
                     VStack(spacing: 6) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 if vm.activeCategory == .roads {
                                     ForEach(RoadKind.allCases) { k in
-                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selRoad == k) { vm.selRoad = k }
+                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selRoad == k, badgeColor: .cyan) { vm.selRoad = k }
                                     }
-                                } else if vm.activeCategory == .zones {
-                                    ForEach(ZoneKind.allCases) { k in
-                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selZone == k) { vm.selZone = k }
+                                } else if vm.activeCategory == .zoning {
+                                    ForEach(ZoneBrushKind.allCases) { z in
+                                        let zCol: Color = z == .commercial ? .blue : (z == .industrialOffice ? .yellow : (z == .clearZone ? .red : .green))
+                                        subItemButton(title: z.title, price: z.costIDR, selected: vm.selZoneBrush == z, badgeColor: zCol) { vm.selZoneBrush = z }
                                     }
                                 } else if vm.activeCategory == .facilities {
                                     ForEach(FacilityKind.allCases) { k in
-                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selFacility == k) { vm.selFacility = k }
+                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selFacility == k, badgeColor: .cyan) { vm.selFacility = k }
                                     }
                                 } else if vm.activeCategory == .utilities {
                                     ForEach(UtilityKind.allCases) { u in
-                                        subItemButton(title: u.title, price: u.costIDR, selected: vm.selUtility == u) { vm.selUtility = u }
+                                        subItemButton(title: u.title, price: u.costIDR, selected: vm.selUtility == u, badgeColor: .yellow) { vm.selUtility = u }
                                     }
                                 } else if vm.activeCategory == .gebrakans {
                                     ForEach(GebrakanKind.allCases) { g in
                                         subItemButton(
                                             title: vm.activeGebrakans.contains(g) ? "✓ \(g.title)" : g.title,
                                             price: g.costIDR,
-                                            selected: vm.activeGebrakans.contains(g)
+                                            selected: vm.activeGebrakans.contains(g),
+                                            badgeColor: .purple
                                         ) { vm.triggerGebrakan(g) }
                                     }
                                 }
@@ -939,7 +1085,7 @@ struct RootGameView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(BuildCategory.allCases) { cat in
-                                    Button { vm.activeCategory = cat } label: {
+                                    Button { vm.selectCategory(cat) } label: {
                                         Label(cat.title, systemImage: cat.icon)
                                             .font(.caption.bold())
                                             .padding(.horizontal, 11)
@@ -980,18 +1126,18 @@ struct RootGameView: View {
             .frame(width: 5, height: max(5, CGFloat(height) * 20))
     }
 
-    private func subItemButton(title: String, price: Int64, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func subItemButton(title: String, price: Int64, selected: Bool, badgeColor: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Text(title).font(.caption.bold())
-                Text(vm.selectedMode == .sandbox ? "Gratis" : IDRFormat.string(price))
+                Text(vm.selectedMode == .sandbox || price == 0 ? "Gratis" : IDRFormat.string(price))
                     .font(.caption2)
-                    .foregroundColor(.cyan)
+                    .foregroundColor(badgeColor)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(selected ? Color.cyan.opacity(0.35) : Color.black.opacity(0.65))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.cyan : Color.clear, lineWidth: 1.5))
+            .background(selected ? badgeColor.opacity(0.32) : Color.black.opacity(0.65))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? badgeColor : Color.clear, lineWidth: 1.5))
             .cornerRadius(8)
         }
     }

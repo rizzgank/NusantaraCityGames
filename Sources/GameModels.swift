@@ -25,7 +25,7 @@ enum CityMapType: String, CaseIterable, Identifiable, Codable {
     }
     var difficultyLabel: String {
         switch self {
-        case .malang: return "Kontur Berbukit • Sejuk"
+        case .malang: return "Kontur Pegunungan • Sejuk"
         case .surabaya: return "Pesisir Luas • Pelabuhan"
         case .jakarta: return "Padat Metropolitan • Sungai"
         }
@@ -38,9 +38,16 @@ enum PlayMode: String, CaseIterable, Identifiable, Codable {
     var title: String { self == .real ? "Mode Real (APBD)" : "Mode Sandbox" }
     var subtitle: String {
         self == .real
-            ? "Modal awal Rp 150 Miliar, pajak warga riil, listrik-air & tantangan lalu lintas"
+            ? "Modal awal Rp 150 Miliar, sistem kuas zona otomatis tumbuh Lv 1–5, pajak & utilitas riil"
             : "Anggaran APBD tak terbatas untuk bebas merancang tata kota impian"
     }
+}
+
+enum TouchToolMode: String, CaseIterable, Identifiable {
+    case buildBrush, panCamera
+    var id: String { rawValue }
+    var title: String { self == .buildBrush ? "Kuas / Tarik" : "Geser Kamera" }
+    var icon: String { self == .buildBrush ? "paintbrush.pointed.fill" : "hand.draw.fill" }
 }
 
 enum CameraMode: String, CaseIterable, Identifiable {
@@ -63,24 +70,25 @@ enum CameraMode: String, CaseIterable, Identifiable {
 }
 
 enum DataLensMode: String, CaseIterable, Identifiable {
-    case normal, traffic, coverage
+    case normal, landValue, utilities, traffic
     var id: String { rawValue }
     var title: String {
         switch self {
         case .normal: return "Normal"
+        case .landValue: return "Level & Nilai Tanah"
+        case .utilities: return "Listrik & Air"
         case .traffic: return "Lensa Macet"
-        case .coverage: return "Lensa Layanan"
         }
     }
 }
 
 enum BuildCategory: String, CaseIterable, Identifiable {
-    case roads, zones, facilities, utilities, gebrakans, bulldoze
+    case roads, zoning, facilities, utilities, gebrakans, bulldoze
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .roads: return "Jalan & Alun-Alun"
-        case .zones: return "Zona Kota"
+        case .roads: return "Tarik Jalan"
+        case .zoning: return "Kuas Zona"
         case .facilities: return "Sekolah & Publik"
         case .utilities: return "Listrik & Air"
         case .gebrakans: return "Menu Gebrakan"
@@ -90,7 +98,7 @@ enum BuildCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .roads: return "road.lanes"
-        case .zones: return "square.grid.2x2.fill"
+        case .zoning: return "paintbrush.fill"
         case .facilities: return "building.2.fill"
         case .utilities: return "bolt.circle.fill"
         case .gebrakans: return "sparkles"
@@ -100,12 +108,12 @@ enum BuildCategory: String, CaseIterable, Identifiable {
 }
 
 enum RoadKind: String, CaseIterable, Identifiable, Codable {
-    case fourLane, twoLane, oneWay, elasticCurve, roundabout, sidewalkTree
+    case twoLane, fourLane, oneWay, elasticCurve, roundabout, sidewalkTree
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .fourLane: return "Jalan 4 Lajur"
         case .twoLane: return "Jalan 2 Lajur"
+        case .fourLane: return "Jalan Arteri 4 Lajur"
         case .oneWay: return "Jalan 1 Arah"
         case .elasticCurve: return "Jalan Elastis (Kurva)"
         case .roundabout: return "Bundaran Alun-Alun"
@@ -114,79 +122,91 @@ enum RoadKind: String, CaseIterable, Identifiable, Codable {
     }
     var costIDR: Int64 {
         switch self {
-        case .fourLane: return 400_000_000
-        case .twoLane: return 200_000_000
-        case .oneWay: return 150_000_000
-        case .elasticCurve: return 320_000_000
+        case .twoLane: return 180_000_000
+        case .fourLane: return 380_000_000
+        case .oneWay: return 140_000_000
+        case .elasticCurve: return 300_000_000
         case .roundabout: return 1_200_000_000
-        case .sidewalkTree: return 100_000_000
+        case .sidewalkTree: return 90_000_000
         }
     }
     var isDriveable: Bool { self != .sidewalkTree }
 }
 
-enum ZoneKind: String, CaseIterable, Identifiable, Codable {
-    case residentialSingle, residentialMulti, commercial, industrial, park
+// Sistem Kuas Zona ala Cities: Skylines (Tanpa tombol rumah manual!)
+enum ZoneBrushKind: String, CaseIterable, Identifiable, Codable {
+    case residentialLow, residentialHigh, commercial, industrialOffice, parkGreen, clearZone
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .residentialSingle: return "Rumah Tapak (Maks 5)"
-        case .residentialMulti: return "Rumah Tingkat (Maks 14)"
+        case .residentialLow: return "Hunian Rendah (Rumah)"
+        case .residentialHigh: return "Hunian Padat (Tingkat/Apt)"
         case .commercial: return "Komersial & Ruko"
-        case .industrial: return "Kawasan Industri"
-        case .park: return "Taman Kota"
+        case .industrialOffice: return "Industri & Kantor"
+        case .parkGreen: return "Taman & RTH"
+        case .clearZone: return "Hapus Cat Zona"
         }
     }
     var costIDR: Int64 {
         switch self {
-        case .residentialSingle: return 240_000_000
-        case .residentialMulti: return 480_000_000
-        case .commercial: return 360_000_000
-        case .industrial: return 460_000_000
-        case .park: return 300_000_000
+        case .residentialLow: return 80_000_000
+        case .residentialHigh: return 160_000_000
+        case .commercial: return 120_000_000
+        case .industrialOffice: return 150_000_000
+        case .parkGreen: return 260_000_000
+        case .clearZone: return 0
         }
     }
-    var maxCapacity: Int {
+    func capacity(forLevel level: Int) -> Int {
         switch self {
-        case .residentialSingle: return 5
-        case .residentialMulti: return 14
-        case .commercial: return 4
-        case .industrial: return 0
-        case .park: return 0
+        case .residentialLow:
+            // Lv 1: 2-3 jiwa, Lv 3 (rumah 2 tingkat): 4-6 jiwa, Lv 5: 7 jiwa
+            return 2 + level
+        case .residentialHigh:
+            // Lv 1: 8 jiwa, Lv 3: 16 jiwa, Lv 5 (apartemen tinggi): 26 jiwa
+            return 4 + level * 4
+        case .commercial:
+            return 2 + level
+        case .industrialOffice, .parkGreen, .clearZone:
+            return 0
         }
     }
-    var jobSlots: Int {
+    func jobSlots(forLevel level: Int) -> Int {
         switch self {
-        case .commercial: return 12
-        case .industrial: return 24
+        case .commercial: return 6 + level * 3
+        case .industrialOffice: return 10 + level * 5
         default: return 0
         }
     }
     var powerNeed: Int {
         switch self {
-        case .residentialSingle: return 2
-        case .residentialMulti: return 5
-        case .commercial: return 6
-        case .industrial: return 12
-        case .park: return 1
+        case .residentialLow: return 2
+        case .residentialHigh: return 5
+        case .commercial: return 5
+        case .industrialOffice: return 10
+        case .parkGreen: return 1
+        case .clearZone: return 0
         }
     }
     var waterNeed: Int {
         switch self {
-        case .residentialSingle: return 2
-        case .residentialMulti: return 5
+        case .residentialLow: return 2
+        case .residentialHigh: return 5
         case .commercial: return 4
-        case .industrial: return 10
-        case .park: return 2
+        case .industrialOffice: return 8
+        case .parkGreen: return 2
+        case .clearZone: return 0
         }
     }
-    var monthlyTaxIDR: Int64 {
+    func monthlyTaxIDR(level: Int) -> Int64 {
+        let mult = Int64(max(1, level))
         switch self {
-        case .residentialSingle: return 14_000_000
-        case .residentialMulti: return 32_000_000
-        case .commercial: return 55_000_000
-        case .industrial: return 85_000_000
-        case .park: return -10_000_000
+        case .residentialLow: return 12_000_000 * mult
+        case .residentialHigh: return 26_000_000 * mult
+        case .commercial: return 42_000_000 * mult
+        case .industrialOffice: return 65_000_000 * mult
+        case .parkGreen: return -8_000_000
+        case .clearZone: return 0
         }
     }
 }
@@ -233,7 +253,7 @@ enum UtilityKind: String, CaseIterable, Identifiable, Codable {
     case garduListrik, menaraPDAM
     var id: String { rawValue }
     var title: String {
-        self == .garduListrik ? "Gardu Induk Listrik (+60 MW)" : "Instalasi Air PDAM (+60 m³)"
+        self == .garduListrik ? "Gardu Induk Listrik (+80 MW)" : "Instalasi Air PDAM (+80 m³)"
     }
     var costIDR: Int64 {
         self == .garduListrik ? 3_500_000_000 : 2_800_000_000
@@ -268,14 +288,16 @@ struct RoadTile: Identifiable, Codable {
     var curveYaw: Float = 0.0
 }
 
-struct ZoneTile: Identifiable, Codable {
+struct ZonedPlot: Identifiable, Codable {
     var id: String { "\(coord.x)_\(coord.z)" }
     let coord: GridCoord
-    var kind: ZoneKind
+    var kind: ZoneBrushKind
+    var buildingLevel: Int // 0 = Konstruksi Scaffolding, 1..5 = Tumbuh & Naik Tingkat Otomatis
     var residents: Int
     var maxResidents: Int
     var hasPower: Bool = true
     var hasWater: Bool = true
+    var isAbandoned: Bool = false
 }
 
 struct FacilityTile: Identifiable, Codable {
@@ -291,8 +313,8 @@ struct UtilityTile: Identifiable, Codable {
 }
 
 enum UndoAction {
-    case placedRoad(GridCoord, Int64)
-    case placedZone(GridCoord, Int64)
+    case placedBatchRoads([GridCoord], Int64)
+    case placedBatchZones([GridCoord], Int64)
     case placedFacility(GridCoord, Int64)
     case placedUtility(GridCoord, Int64)
 }
@@ -311,7 +333,7 @@ struct CitySaveSnapshot: Codable {
     let budgetIDR: Int64
     let population: Int
     let roads: [RoadTile]
-    let zones: [ZoneTile]
+    let plots: [ZonedPlot]
     let facilities: [FacilityTile]
     let utilities: [UtilityTile]
     let activeGebrakans: [GebrakanKind]
@@ -320,6 +342,7 @@ struct CitySaveSnapshot: Codable {
 struct GameSettings: Codable {
     var hdShadows: Bool = true
     var atmosphericFog: Bool = true
+    var hdrBloom: Bool = true
     var bgmVolume: Float = 0.42
     var sfxVolume: Float = 0.65
     var cameraSensitivity: Float = 1.0

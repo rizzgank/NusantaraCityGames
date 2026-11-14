@@ -63,14 +63,14 @@ def fbm_noise(size: int, octaves=(16, 64, 256), weights=(0.50, 0.30, 0.20)) -> n
     return np.clip(acc, 0.0, 1.0)
 
 
-def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 10):
+def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 8):
     h, w, _ = arr_float.shape
     grain = RNG.integers(-micro_grain, micro_grain + 1, size=(h, w, 3), dtype=np.int16)
     out = np.clip(arr_float.astype(np.int16) + grain, 0, 255).astype(np.uint8)
     Image.fromarray(out, mode="RGB").save(path, format="PNG", compress_level=6)
 
 
-def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) -> np.ndarray:
+def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.8) -> np.ndarray:
     dy, dx = np.gradient(height_2d * strength)
     nx, ny, nz = -dx, -dy, np.ones_like(height_2d)
     norm = np.sqrt(nx * nx + ny * ny + nz * nz) + 1e-6
@@ -81,6 +81,46 @@ def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) ->
     ], axis=-1)
 
 
+def generate_foliage_texture(path: str, base_rgb: tuple, highlight_rgb: tuple, pine_shape: bool = False):
+    S = 512
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    cx = S // 2
+    for i in range(280):
+        t = i / 280.0
+        if pine_shape:
+            y = int(42 + t * 410)
+            half_w = int(20 + t * 185)
+        else:
+            ang = RNG.uniform(0, 2 * np.pi)
+            rad = np.sqrt(RNG.uniform(0, 1)) * 205
+            x = int(cx + np.cos(ang) * rad)
+            y = int(245 + np.sin(ang) * rad * 0.88)
+            r = int(RNG.integers(14, 34))
+            mix = RNG.uniform(0.0, 1.0)
+            col = (
+                int(base_rgb[0] * (1 - mix) + highlight_rgb[0] * mix),
+                int(base_rgb[1] * (1 - mix) + highlight_rgb[1] * mix),
+                int(base_rgb[2] * (1 - mix) + highlight_rgb[2] * mix),
+                245,
+            )
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=col)
+            continue
+
+        x = int(cx + RNG.integers(-half_w, half_w + 1))
+        r = int(RNG.integers(12, 26))
+        mix = RNG.uniform(0.0, 1.0)
+        col = (
+            int(base_rgb[0] * (1 - mix) + highlight_rgb[0] * mix),
+            int(base_rgb[1] * (1 - mix) + highlight_rgb[1] * mix),
+            int(base_rgb[2] * (1 - mix) + highlight_rgb[2] * mix),
+            245,
+        )
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=col)
+
+    img.save(path, format="PNG")
+
+
 def generate_textures():
     S = 1024
     n_base = fbm_noise(S, octaves=(8, 32, 128))
@@ -89,10 +129,10 @@ def generate_textures():
 
     # 1. Asphalt & Roads
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
-    asphalt[..., 0] = 36 + n_base * 20 + n_fine * 12
-    asphalt[..., 1] = 38 + n_base * 20 + n_fine * 12
-    asphalt[..., 2] = 44 + n_base * 22 + n_fine * 14
-    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=6)
+    asphalt[..., 0] = 34 + n_base * 18 + n_fine * 12
+    asphalt[..., 1] = 36 + n_base * 18 + n_fine * 12
+    asphalt[..., 2] = 42 + n_base * 20 + n_fine * 14
+    save_rgb_png(generate_normal_from_height(n_fine, 4.0), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=5)
 
     road_2l = asphalt.copy()
     road_2l[:, 18:34] = [238, 238, 232]
@@ -120,40 +160,50 @@ def generate_textures():
     paving[..., 2] = np.where(checker > 0, 78, 128) + n_fine * 18 - grout * 50
     save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"))
 
-    # 3. Grass Nusantara & Normal
+    # 3. Grass & Water Normal
     grass = np.zeros((S, S, 3), dtype=np.float32)
     grass[..., 0] = 44 + n_base * 30 + n_fine * 16
     grass[..., 1] = 112 + n_base * 46 + n_fine * 24
     grass[..., 2] = 36 + n_base * 20 + n_fine * 12
     save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"))
-    save_rgb_png(generate_normal_from_height(n_fine, 3.6), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=6)
+    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=5)
+
+    wave_h = np.sin(xx * 0.06 + n_base * 4.0) * 0.5 + np.cos(yy * 0.08 + n_fine * 3.0) * 0.5
+    save_rgb_png(generate_normal_from_height(wave_h, 2.8), os.path.join(TEXTURES_DIR, "water_normal.png"), micro_grain=3)
 
     # 4. Terracotta Roof Tiles
     tile_wave = np.sin((xx / 16.0) * np.pi) * 18.0
     row_step = ((yy % 32) < 4).astype(np.float32) * 35.0
     roof = np.zeros((S, S, 3), dtype=np.float32)
-    roof[..., 0] = 178 + n_base * 24 + tile_wave - row_step
+    roof[..., 0] = 182 + n_base * 22 + tile_wave - row_step
     roof[..., 1] = 74 + n_base * 16 + tile_wave * 0.5 - row_step
     roof[..., 2] = 48 + n_base * 12 - row_step * 0.6
     save_rgb_png(roof, os.path.join(TEXTURES_DIR, "roof_terracotta_albedo.png"))
 
-    # 5. Office / University / High-Rise Facade (Day & Night City Lights)
+    # 5. Residential House Wall & High-Rise Facade
     win_x = (xx % 64 >= 12) & (xx % 64 <= 52)
     win_y = (yy % 64 >= 14) & (yy % 64 <= 50)
     is_window = win_x & win_y
     cell_id = (xx // 64) * 31 + (yy // 64) * 17
     lit_mask = is_window & ((cell_id % 4) != 0)
 
+    house_wall = np.zeros((S, S, 3), dtype=np.float32)
+    house_wall[..., 0] = np.where(is_window, 46, 236 + n_base * 14)
+    house_wall[..., 1] = np.where(is_window, 68, 228 + n_base * 14)
+    house_wall[..., 2] = np.where(is_window, 92, 212 + n_base * 14)
+    house_wall[yy > 820, :] = [110, 114, 120]
+    save_rgb_png(house_wall, os.path.join(TEXTURES_DIR, "house_wall_albedo.png"))
+
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
-    facade_day[..., 0] = np.where(is_window, 54, 206 + n_base * 22)
-    facade_day[..., 1] = np.where(is_window, 84, 202 + n_base * 22)
-    facade_day[..., 2] = np.where(is_window, 118, 194 + n_base * 22)
+    facade_day[..., 0] = np.where(is_window, 44, 196 + n_base * 20)
+    facade_day[..., 1] = np.where(is_window, 76, 198 + n_base * 20)
+    facade_day[..., 2] = np.where(is_window, 114, 196 + n_base * 20)
     save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"))
 
     facade_night = np.zeros((S, S, 3), dtype=np.float32)
-    facade_night[..., 0] = np.where(lit_mask, 255, 6)
-    facade_night[..., 1] = np.where(lit_mask, 206, 8)
-    facade_night[..., 2] = np.where(lit_mask, 112, 16)
+    facade_night[..., 0] = np.where(lit_mask, 255, 4)
+    facade_night[..., 1] = np.where(lit_mask, 210, 6)
+    facade_night[..., 2] = np.where(lit_mask, 115, 14)
     save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"))
 
     # 6. School / Civic Facade
@@ -178,6 +228,11 @@ def generate_textures():
     indo[170:210, :] = [255, 204, 0]
     indo[350:920, 90:930] = [48, 76, 108]
     save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"))
+
+    # 9. Alpha-Cutout Foliage Textures (Crossed Planes)
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tropical_foliage.png"), (28, 105, 36), (78, 176, 68), pine_shape=False)
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_pine_foliage.png"), (18, 78, 34), (48, 134, 62), pine_shape=True)
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tabebuya_foliage.png"), (218, 92, 138), (255, 172, 204), pine_shape=False)
 
 
 def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 22050):
@@ -217,4 +272,4 @@ if __name__ == "__main__":
     generate_app_icon()
     generate_textures()
     generate_audio()
-    print("v3.0 HD Realistic Assets & AppIcon generated cleanly!")
+    print("v4.0 Cities: Skylines HD PBR + Alpha Foliage Assets generated!")
