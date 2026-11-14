@@ -30,6 +30,31 @@ enum TimeOfDayPhase: Int, CaseIterable, Codable {
     var isLitTime: Bool { self == .sunset || self == .night }
 }
 
+enum CityWeather: String, CaseIterable, Codable {
+    case cerahBerawan
+    case anginSepoi
+    case hujanTropis
+    case kabutPegunungan
+
+    var title: String {
+        switch self {
+        case .cerahBerawan: return "Cerah Berawan • 28°C"
+        case .anginSepoi: return "Berangin Sejuk • 25°C"
+        case .hujanTropis: return "Hujan Tropis • 23°C"
+        case .kabutPegunungan: return "Kabut Lembah • 21°C"
+        }
+    }
+
+    var windSummary: String {
+        switch self {
+        case .cerahBerawan: return "Angin Tenggara 11 km/j, jarak pandang 14 km, ideal untuk konstruksi."
+        case .anginSepoi: return "Angin Lembah 24 km/j menggoyangkan pepohonan & menerbangkan daun gugur."
+        case .hujanTropis: return "Curah hujan sedang, kelembapan 88%, pasokan air sungai meningkat."
+        case .kabutPegunungan: return "Kabut tipis turun dari lereng pegunungan, jarak pandang 6 km."
+        }
+    }
+}
+
 enum CityMapType: String, CaseIterable, Identifiable, Codable {
     case malang, surabaya, jakarta
     var id: String { rawValue }
@@ -62,7 +87,7 @@ enum PlayMode: String, CaseIterable, Identifiable, Codable {
     var title: String { self == .real ? "Mode Real (APBD)" : "Mode Sandbox" }
     var subtitle: String {
         self == .real
-            ? "Modal awal Rp 150 Miliar, sistem kuas zona otomatis tumbuh Lv 1–5, pajak & utilitas riil"
+            ? "Modal awal Rp 150 Miliar, kuas zona otomatis tumbuh Lv 1–5, AI Perizinan & pajak riil"
             : "Anggaran APBD tak terbatas untuk bebas merancang tata kota impian"
     }
 }
@@ -130,7 +155,7 @@ enum RoadKind: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .twoLane: return "Jalan 2 Lajur"
-        case .fourLane: return "Jalan Arteri 4 Lajur"
+        case .fourLane: return "Arteri 4 Lajur (Lebar)"
         case .oneWay: return "Jalan 1 Arah"
         case .elasticCurve: return "Jalan Elastis"
         case .roundabout: return "Bundaran Alun-Alun"
@@ -140,7 +165,7 @@ enum RoadKind: String, CaseIterable, Identifiable, Codable {
     var costIDR: Int64 {
         switch self {
         case .twoLane: return 180_000_000
-        case .fourLane: return 380_000_000
+        case .fourLane: return 420_000_000
         case .oneWay: return 140_000_000
         case .elasticCurve: return 300_000_000
         case .roundabout: return 1_200_000_000
@@ -291,6 +316,39 @@ enum GebrakanKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+struct CustomAIGebrakan: Identifiable, Codable {
+    let id: UUID
+    let title: String
+    let userPrompt: String
+    let aiReasoning: String
+    let costIDR: Int64
+    let happinessDelta: Int
+    let taxMultiplierBonus: Double
+    let educationDelta: Int
+}
+
+struct FranchisePermitRequest: Identifiable, Codable {
+    let id: UUID
+    let brandName: String
+    let companyName: String
+    let branchTitle: String
+    let licenseFeeIDR: Int64
+    let happinessBonus: Int
+    let zoneKind: ZoneBrushKind
+    let brandSkin: Int // 1 = Indomaret, 2 = Alfamart, 0 = Modern Commercial
+    var resolved: Bool = false
+    var approved: Bool = false
+}
+
+struct AIChatMessage: Identifiable {
+    let id = UUID()
+    let isFromUser: Bool
+    let senderName: String
+    let text: String
+    let timestamp: String
+    var permit: FranchisePermitRequest? = nil
+}
+
 struct RoadTile: Identifiable, Codable {
     var id: String { "\(coord.x)_\(coord.z)" }
     let coord: GridCoord
@@ -308,6 +366,7 @@ struct ZonedPlot: Identifiable, Codable {
     var hasPower: Bool = true
     var hasWater: Bool = true
     var isAbandoned: Bool = false
+    var forcedBrandSkin: Int = 0 // 0 = auto, 1 = Indomaret, 2 = Alfamart
 }
 
 struct FacilityTile: Identifiable, Codable {
@@ -347,6 +406,7 @@ struct CitySaveSnapshot: Codable {
     let facilities: [FacilityTile]
     let utilities: [UtilityTile]
     let activeGebrakans: [GebrakanKind]
+    let customGebrakans: [CustomAIGebrakan]
 }
 
 struct GameSettings: Codable {

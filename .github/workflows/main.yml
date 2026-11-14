@@ -1,4 +1,4 @@
-﻿name: Build City Building Nusantara v5.0 Visual Overhaul IPA
+﻿name: Build City Building Nusantara v6.0 Ultra HD & NUSA AI IPA
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate 360 Sky Domes, HD PBR Textures, Audio & AppIcon
+      - name: Generate Ultra-HD PBR Textures, Sky Domes, Audio & AppIcon
         run: |
           rm -rf Resources GameAssets Assets.xcassets
           python3 Scripts/generate_assets.py
@@ -60,12 +60,12 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CityBuildingNusantara-v5-VisualOverhaul-IPA
+          name: CityBuildingNusantara-v6-UltraHD-IPA
           path: CityBuildingNusantara.ipa
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.0.${{ github.run_number }}
-          name: "City Building : Nusantara Project v5.0.${{ github.run_number }} (Visual & UI Overhaul)"
+          tag_name: v6.0.${{ github.run_number }}
+          name: "City Building : Nusantara Project v6.0.${{ github.run_number }} (Ultra-HD & NUSA AI)"
           files: CityBuildingNusantara.ipa
