@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -29,16 +30,16 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate 3D Models, 2K Textures, Maps & Audio (100MB+)
+      - name: Generate AppIcon, 3D Models, 2K Textures, Maps & Audio (100MB+)
         run: |
           python3 Scripts/generate_assets.py
-          du -sh Resources
+          du -sh Resources Assets.xcassets
 
       - name: Generate Xcode Project via XcodeGen
         run: |
           xcodegen generate
 
-      - name: Build Unsigned Release App for iPhone
+      - name: Build Release App for iPhone
         run: |
           xcodebuild \
             -project CityBuildingNusantara.xcodeproj \
@@ -49,14 +50,14 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
             build
 
-      - name: Package Payload into CityBuildingNusantara.ipa
+      - name: Ad-Hoc Sign & Package Payload into CityBuildingNusantara.ipa
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          zip -r -y CityBuildingNusantara.ipa Payload
+          codesign --force --sign - --timestamp=none Payload/CityBuildingNusantara.app
+          ditto -c -k --sequesterRsrc --keepParent Payload CityBuildingNusantara.ipa
           ls -lh CityBuildingNusantara.ipa
 
       - name: Upload IPA to GitHub Actions Artifacts
@@ -73,5 +74,5 @@ jobs:
           name: "City Building : Nusantara Project v1.0.${{ github.run_number }}"
           body: |
             Build otomatis oleh Rizzi Games (RG) via GitHub Actions.
-            Unduh file **CityBuildingNusantara.ipa** di bawah ini dan pasang menggunakan TrollStore, Filza, atau AppSync.
+            Siap di-sign & install menggunakan ESign, TrollStore, atau Filza.
           files: CityBuildingNusantara.ipa
