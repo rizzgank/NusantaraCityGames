@@ -1,4 +1,4 @@
-﻿name: Build City Building Nusantara v6.0 Ultra HD & NUSA AI IPA
+﻿name: Build City Building Nusantara v7.0 Next-Gen PBR IPA
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate Ultra-HD PBR Textures, Sky Domes, Audio & AppIcon
+      - name: Generate Next-Gen PBR Textures, Glass Maps, Sky Domes & Audio
         run: |
           rm -rf Resources GameAssets Assets.xcassets
           python3 Scripts/generate_assets.py
@@ -45,7 +45,7 @@ jobs:
             -sdk iphoneos \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             clean build
 
@@ -60,12 +60,12 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CityBuildingNusantara-v6-UltraHD-IPA
+          name: CityBuildingNusantara-v7-NextGenPBR-IPA
           path: CityBuildingNusantara.ipa
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v6.0.${{ github.run_number }}
-          name: "City Building : Nusantara Project v6.0.${{ github.run_number }} (Ultra-HD & NUSA AI)"
+          tag_name: v7.0.${{ github.run_number }}
+          name: "City Building : Nusantara Project v7.0.${{ github.run_number }} (Next-Gen PBR & Dual-Axis Orbit)"
           files: CityBuildingNusantara.ipa

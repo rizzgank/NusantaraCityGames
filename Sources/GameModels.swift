@@ -335,7 +335,7 @@ struct FranchisePermitRequest: Identifiable, Codable {
     let licenseFeeIDR: Int64
     let happinessBonus: Int
     let zoneKind: ZoneBrushKind
-    let brandSkin: Int // 1 = Indomaret, 2 = Alfamart, 0 = Modern Commercial
+    let brandSkin: Int
     var resolved: Bool = false
     var approved: Bool = false
 }
@@ -366,7 +366,7 @@ struct ZonedPlot: Identifiable, Codable {
     var hasPower: Bool = true
     var hasWater: Bool = true
     var isAbandoned: Bool = false
-    var forcedBrandSkin: Int = 0 // 0 = auto, 1 = Indomaret, 2 = Alfamart
+    var forcedBrandSkin: Int = 0
 }
 
 struct FacilityTile: Identifiable, Codable {

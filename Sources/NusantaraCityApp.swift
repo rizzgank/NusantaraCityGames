@@ -65,13 +65,11 @@ final class GameViewModel: ObservableObject {
     @Published var activeGebrakans: Set<GebrakanKind> = []
     @Published var customGebrakans: [CustomAIGebrakan] = []
 
-    // AI Gebrakan Creator Modal States
     @Published var showCustomGebrakanModal: Bool = false
     @Published var customGebrakanPrompt: String = ""
     @Published var isAIThinkingGebrakan: Bool = false
     @Published var draftedAIGebrakan: CustomAIGebrakan? = nil
 
-    // NUSA AI Agent Chat & Corporate Franchise Permits
     @Published var showAIChatDrawer: Bool = false
     @Published var chatInputText: String = ""
     @Published var chatMessages: [AIChatMessage] = []
@@ -148,7 +146,7 @@ final class GameViewModel: ObservableObject {
             )
         ]
         unreadAINotifications = 1
-        aiAgentMessage = "Geser 1 jari: Peta • Geser/putar 2 jari: Rotasi 360° • Ketuk 2 titik: Tarik Jalan/Zona"
+        aiAgentMessage = "1 jari: Geser Peta • 2 jari Kiri/Kanan: Rotasi • 2 jari Atas/Bawah: Sudut Vertikal"
         startSimulationLoop()
     }
 
@@ -157,8 +155,6 @@ final class GameViewModel: ObservableObject {
         fmt.dateFormat = "HH:mm"
         return fmt.string(from: Date())
     }
-
-    // MARK: - AI Gebrakan Kustom ("Mikir Keras" & Real City Policy Generator)
 
     func runCustomAIGebrakanAnalysis() {
         let raw = customGebrakanPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -234,8 +230,6 @@ final class GameViewModel: ObservableObject {
         aiAgentMessage = "Gebrakan Kustom '\(policy.title)' resmi disahkan!"
         showToast("Disahkan: \(policy.title)")
     }
-
-    // MARK: - NUSA AI Interactive Chat & Corporate Branch Permits
 
     func openAIChat() {
         showAIChatDrawer = true
@@ -324,7 +318,6 @@ final class GameViewModel: ObservableObject {
 
         if approve {
             budgetIDR += permit.licenseFeeIDR
-            // Automatically construct the branch on a valid roadside plot!
             if let spot = findAvailableRoadsidePlot() {
                 plots[spot] = ZonedPlot(
                     coord: spot,
@@ -380,10 +373,8 @@ final class GameViewModel: ObservableObject {
         return nil
     }
 
-    // MARK: - Save & Load Multi-Slot
-
     func slotSnapshot(_ slot: Int) -> CitySaveSnapshot? {
-        guard let data = UserDefaults.standard.data(forKey: "nusantara.v6.slot.\(slot)") else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: "nusantara.v7.slot.\(slot)") else { return nil }
         return try? JSONDecoder().decode(CitySaveSnapshot.self, from: data)
     }
 
@@ -405,7 +396,7 @@ final class GameViewModel: ObservableObject {
             customGebrakans: customGebrakans
         )
         if let encoded = try? JSONEncoder().encode(snap) {
-            UserDefaults.standard.set(encoded, forKey: "nusantara.v6.slot.\(slot)")
+            UserDefaults.standard.set(encoded, forKey: "nusantara.v7.slot.\(slot)")
             showToast("Kota tersimpan di Slot \(slot)!")
         }
     }
@@ -433,8 +424,6 @@ final class GameViewModel: ObservableObject {
         startSimulationLoop()
         showToast("Kota \(selectedMap.title) dari Slot \(slot) dimuat!")
     }
-
-    // MARK: - Tap-to-Anchor + Marquee Block Builder
 
     private func computeRoadPath(from a: GridCoord, to b: GridCoord) -> [GridCoord] {
         var result: [GridCoord] = [a]
@@ -706,8 +695,6 @@ final class GameViewModel: ObservableObject {
         return true
     }
 
-    // MARK: - Simulasi Kota, Cuaca Dinamis & Undangan Investor
-
     private func recalcStats() {
         let pSup = utilities.values.filter { $0.kind == .garduListrik }.count * 80
         let wSup = utilities.values.filter { $0.kind == .menaraPDAM }.count * 80
@@ -798,7 +785,6 @@ final class GameViewModel: ObservableObject {
                     self.budgetIDR += tax
                 }
 
-                // Dynamic Weather Cycle every 8 ticks (~40s)
                 if self.simTickCount % 8 == 0 {
                     let allW = CityWeather.allCases
                     if let idx = allW.firstIndex(of: self.weather) {
@@ -807,7 +793,6 @@ final class GameViewModel: ObservableObject {
                     }
                 }
 
-                // Trigger Corporate Franchise Permit Application (Indomaret, Alfamart, etc.) when city has roads & plots
                 if self.simTickCount % 4 == 0 && !self.roads.isEmpty && !self.plots.isEmpty {
                     let hasPending = self.chatMessages.contains { $0.permit != nil && $0.permit?.resolved == false }
                     if !hasPending {
@@ -849,15 +834,6 @@ final class GameViewModel: ObservableObject {
         }
     }
 
-    func cycleLensMode() {
-        let all = DataLensMode.allCases
-        if let idx = all.firstIndex(of: lensMode) {
-            lensMode = all[(idx + 1) % all.count]
-            engine.setLensMode(lensMode)
-            showToast("Info View: \(lensMode.title)")
-        }
-    }
-
     private func showToast(_ msg: String) {
         toast = msg
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
@@ -865,8 +841,6 @@ final class GameViewModel: ObservableObject {
         }
     }
 }
-
-// MARK: - SwiftUI Views (Safe-Area HUD, AI Gebrakan Creator & NUSA AI Chat Drawer)
 
 struct RootGameView: View {
     @StateObject private var vm = GameViewModel()
@@ -1154,7 +1128,6 @@ struct RootGameView: View {
         .cornerRadius(20)
     }
 
-    // Strict Safe-Area HUD + NUSA AI Chat & Custom Gebrakan
     private var inGameSafeHUD: some View {
         GeometryReader { geo in
             let safeLeft = max(geo.safeAreaInsets.leading, 18)
@@ -1182,7 +1155,6 @@ struct RootGameView: View {
                     .padding(.trailing, safeRight)
                 } else {
                     VStack(spacing: 6) {
-                        // Top Bar: 2 Kapsul Kaca Ramping
                         HStack(spacing: 8) {
                             HStack(spacing: 8) {
                                 Button { vm.enterMainMenu() } label: {
@@ -1207,7 +1179,6 @@ struct RootGameView: View {
                                 compactStat(label: "MW", value: "\(vm.powerSupply)/\(vm.powerDemand)", color: vm.powerSupply >= vm.powerDemand ? .yellow : .red)
                                 compactStat(label: "Air", value: "\(vm.waterSupply)/\(vm.waterDemand)", color: vm.waterSupply >= vm.waterDemand ? .blue : .red)
 
-                                // NUSA AI Agent Chat Button + Notification Badge
                                 Button { vm.openAIChat() } label: {
                                     ZStack(alignment: .topTrailing) {
                                         Label("NUSA AI", systemImage: "bubble.left.and.sparkles.fill")
@@ -1248,7 +1219,6 @@ struct RootGameView: View {
                         }
                         .foregroundColor(.white)
 
-                        // Bar AI Nusa Ringkas (Bisa diketuk langsung untuk membuka Chat AI)
                         Button { vm.openAIChat() } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "sparkles").font(.caption2).foregroundColor(.cyan)
@@ -1265,7 +1235,6 @@ struct RootGameView: View {
                             .cornerRadius(8)
                         }
 
-                        // Bar Konfirmasi Marquee Build (✓ Bangun / ✕ Batal)
                         if let summary = vm.stagedSummary {
                             HStack(spacing: 10) {
                                 Text(summary)
@@ -1303,7 +1272,6 @@ struct RootGameView: View {
                                 .cornerRadius(10)
                         }
 
-                        // Tengah: Kartu Inspeksi Warga (Kiri) & Tombol Kamera + Rotasi Horizontal (Kanan)
                         HStack(alignment: .top) {
                             if let card = vm.inspectCard {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -1338,14 +1306,14 @@ struct RootGameView: View {
                                     }
                                 }
                                 HStack(spacing: 4) {
-                                    Button { vm.engine.rotateHorizontal(deltaYaw: -0.35) } label: {
+                                    Button { vm.engine.orbitDualAxis(deltaYaw: -0.35, deltaPitch: 0) } label: {
                                         Image(systemName: "rotate.left.fill")
                                             .font(.caption.bold())
                                             .frame(width: 32, height: 32)
                                             .background(.ultraThinMaterial)
                                             .cornerRadius(8)
                                     }
-                                    Button { vm.engine.rotateHorizontal(deltaYaw: 0.35) } label: {
+                                    Button { vm.engine.orbitDualAxis(deltaYaw: 0.35, deltaPitch: 0) } label: {
                                         Image(systemName: "rotate.right.fill")
                                             .font(.caption.bold())
                                             .frame(width: 32, height: 32)
@@ -1354,15 +1322,15 @@ struct RootGameView: View {
                                     }
                                 }
                                 HStack(spacing: 4) {
-                                    Button { vm.engine.zoomCamera(scaleFactor: 1.25) } label: {
-                                        Image(systemName: "plus.magnifyingglass")
+                                    Button { vm.engine.orbitDualAxis(deltaYaw: 0, deltaPitch: 0.14) } label: {
+                                        Image(systemName: "arrow.up")
                                             .font(.caption.bold())
                                             .frame(width: 32, height: 32)
                                             .background(.ultraThinMaterial)
                                             .cornerRadius(8)
                                     }
-                                    Button { vm.engine.zoomCamera(scaleFactor: 0.8) } label: {
-                                        Image(systemName: "minus.magnifyingglass")
+                                    Button { vm.engine.orbitDualAxis(deltaYaw: 0, deltaPitch: -0.14) } label: {
+                                        Image(systemName: "arrow.down")
                                             .font(.caption.bold())
                                             .frame(width: 32, height: 32)
                                             .background(.ultraThinMaterial)
@@ -1375,7 +1343,6 @@ struct RootGameView: View {
 
                         Spacer()
 
-                        // Floating Sub-Tray
                         if vm.showSubTray && vm.activeCategory != .bulldoze {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 7) {
@@ -1405,7 +1372,6 @@ struct RootGameView: View {
                                             }
                                         }
                                     } else if vm.activeCategory == .gebrakans {
-                                        // Tombol Buat Gebrakan AI Kustom!
                                         Button {
                                             vm.draftedAIGebrakan = nil
                                             vm.showCustomGebrakanModal = true
@@ -1446,7 +1412,6 @@ struct RootGameView: View {
                             .cornerRadius(12)
                         }
 
-                        // Dock Bawah 1 Baris Ramping
                         HStack(spacing: 6) {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
@@ -1482,12 +1447,10 @@ struct RootGameView: View {
                     .padding(.bottom, safeBottom)
                 }
 
-                // Modal 1: Buat Gebrakan AI Sendiri ("Mikir Keras")
                 if vm.showCustomGebrakanModal {
                     customAIGebrakanModal
                 }
 
-                // Modal 2: NUSA AI Agent Chat Drawer (Cuaca, Laporan & Perizinan Indomaret/Investor)
                 if vm.showAIChatDrawer {
                     nusaAIChatOverlay
                         .padding(.leading, safeLeft)
@@ -1585,7 +1548,6 @@ struct RootGameView: View {
                 .onTapGesture { vm.showAIChatDrawer = false }
 
             VStack(spacing: 8) {
-                // Header
                 HStack {
                     Label("NUSA AI • Asisten Walikota & Perizinan", systemImage: "bubble.left.and.sparkles.fill")
                         .font(.subheadline.bold())
@@ -1602,7 +1564,6 @@ struct RootGameView: View {
                     }
                 }
 
-                // Quick Chat Prompts
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         quickChatChip("🌤️ Info Cuaca & Angin") { vm.sendUserChat("Info cuaca dan angin kota saat ini?") }
@@ -1612,7 +1573,6 @@ struct RootGameView: View {
                     }
                 }
 
-                // Messages ScrollView
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(vm.chatMessages) { msg in
@@ -1661,7 +1621,6 @@ struct RootGameView: View {
                     .padding(.horizontal, 4)
                 }
 
-                // Input Bar
                 HStack(spacing: 8) {
                     TextField("Tanya cuaca, laporan kota, atau perizinan...", text: $vm.chatInputText)
                         .textFieldStyle(.roundedBorder)

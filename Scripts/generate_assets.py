@@ -9,7 +9,7 @@ BASE_DIR = "GameAssets"
 TEXTURES_DIR = os.path.join(BASE_DIR, "Textures")
 AUDIO_DIR = os.path.join(BASE_DIR, "Audio")
 ICONSET_DIR = os.path.join("Assets.xcassets", "AppIcon.appiconset")
-RNG = np.random.default_rng(20261116)
+RNG = np.random.default_rng(20261117)
 
 
 def ensure_dirs():
@@ -53,51 +53,6 @@ def generate_app_icon():
         json.dump(contents, fp, indent=2)
 
 
-def generate_sky_domes():
-    W, H = 1024, 512
-    yy, xx = np.mgrid[0:H, 0:W]
-    v = yy.astype(np.float32) / float(H)
-    above = v <= 0.52
-    t_up = np.clip(v / 0.52, 0.0, 1.0)
-
-    # 1. Day Sky Panorama with Volumetric Clouds
-    cloud_n = fbm_noise_rect(W, H, octaves=(8, 24, 64))
-    day = np.zeros((H, W, 3), dtype=np.float32)
-    day[..., 0] = np.where(above, 36 * (1 - t_up) + 185 * (t_up ** 1.6), 72)
-    day[..., 1] = np.where(above, 122 * (1 - t_up) + 222 * (t_up ** 1.4), 96)
-    day[..., 2] = np.where(above, 226 * (1 - t_up) + 248 * (t_up ** 1.2), 112)
-    cloud_mask = np.clip((cloud_n - 0.52) * 2.8, 0.0, 1.0) * np.where(above, 1.0 - (t_up ** 3), 0.0)
-    day[..., 0] = day[..., 0] * (1 - cloud_mask * 0.75) + 252 * (cloud_mask * 0.75)
-    day[..., 1] = day[..., 1] * (1 - cloud_mask * 0.75) + 252 * (cloud_mask * 0.75)
-    day[..., 2] = day[..., 2] * (1 - cloud_mask * 0.75) + 255 * (cloud_mask * 0.75)
-    sun_d = np.sqrt(((xx - 720.0) / 1.4) ** 2 + (yy - 165.0) ** 2)
-    sun_glow = np.exp(-sun_d / 38.0) * 140.0
-    day = np.clip(day + sun_glow[..., None] * np.array([1.0, 0.94, 0.78]), 0, 255)
-    Image.fromarray(day.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_day_equirect.png"), format="PNG")
-
-    # 2. Golden Hour Sunset Panorama
-    sunset = np.zeros((H, W, 3), dtype=np.float32)
-    sunset[..., 0] = np.where(above, 28 * (1 - t_up) + 252 * (t_up ** 1.5), 48)
-    sunset[..., 1] = np.where(above, 42 * (1 - t_up) + 148 * (t_up ** 1.7), 38)
-    sunset[..., 2] = np.where(above, 96 * (1 - t_up) + 92 * (t_up ** 1.2), 52)
-    sun_d2 = np.sqrt(((xx - 760.0) / 1.6) ** 2 + (yy - 235.0) ** 2)
-    glow2 = np.exp(-sun_d2 / 52.0) * 160.0
-    sunset = np.clip(sunset + glow2[..., None] * np.array([1.0, 0.72, 0.35]), 0, 255)
-    Image.fromarray(sunset.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_sunset_equirect.png"), format="PNG")
-
-    # 3. Starry Night Panorama
-    night = np.zeros((H, W, 3), dtype=np.float32)
-    night[..., 0] = np.where(above, 6 * (1 - t_up) + 22 * t_up, 8)
-    night[..., 1] = np.where(above, 10 * (1 - t_up) + 32 * t_up, 10)
-    night[..., 2] = np.where(above, 26 * (1 - t_up) + 58 * t_up, 18)
-    for _ in range(420):
-        sx = int(RNG.integers(0, W))
-        sy = int(RNG.integers(10, int(H * 0.46)))
-        b = float(RNG.integers(150, 255))
-        night[sy, sx] = [b, b, min(255.0, b * 1.05)]
-    Image.fromarray(night.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_night_equirect.png"), format="PNG")
-
-
 def fbm_noise_rect(w: int, h: int, octaves=(16, 64, 256), weights=(0.50, 0.30, 0.20)) -> np.ndarray:
     acc = np.zeros((h, w), dtype=np.float32)
     for grid, weight in zip(octaves, weights):
@@ -112,11 +67,16 @@ def fbm_noise(size: int, octaves=(16, 64, 256), weights=(0.50, 0.30, 0.20)) -> n
     return fbm_noise_rect(size, size, octaves, weights)
 
 
-def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 7):
+def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 5):
     h, w, _ = arr_float.shape
     grain = RNG.integers(-micro_grain, micro_grain + 1, size=(h, w, 3), dtype=np.int16)
     out = np.clip(arr_float.astype(np.int16) + grain, 0, 255).astype(np.uint8)
     Image.fromarray(out, mode="RGB").save(path, format="PNG", compress_level=6)
+
+
+def save_gray_png(arr_float: np.ndarray, path: str):
+    out = np.clip(arr_float, 0, 255).astype(np.uint8)
+    Image.fromarray(out, mode="L").save(path, format="PNG", compress_level=6)
 
 
 def generate_normal_from_height(height_2d: np.ndarray, strength: float = 4.2) -> np.ndarray:
@@ -130,33 +90,77 @@ def generate_normal_from_height(height_2d: np.ndarray, strength: float = 4.2) ->
     ], axis=-1)
 
 
+def generate_sky_domes():
+    W, H = 1024, 512
+    yy, xx = np.mgrid[0:H, 0:W]
+    v = yy.astype(np.float32) / float(H)
+    above = v <= 0.52
+    t_up = np.clip(v / 0.52, 0.0, 1.0)
+
+    # 1. Crisp Cities: Skylines Daylight Sky with Cumulus Clouds
+    cloud_n = fbm_noise_rect(W, H, octaves=(8, 24, 64))
+    day = np.zeros((H, W, 3), dtype=np.float32)
+    day[..., 0] = np.where(above, 32 * (1 - t_up) + 178 * (t_up ** 1.55), 86)
+    day[..., 1] = np.where(above, 128 * (1 - t_up) + 224 * (t_up ** 1.35), 118)
+    day[..., 2] = np.where(above, 238 * (1 - t_up) + 252 * (t_up ** 1.15), 134)
+    cloud_mask = np.clip((cloud_n - 0.50) * 3.0, 0.0, 1.0) * np.where(above, 1.0 - (t_up ** 3.2), 0.0)
+    day[..., 0] = day[..., 0] * (1 - cloud_mask * 0.80) + 254 * (cloud_mask * 0.80)
+    day[..., 1] = day[..., 1] * (1 - cloud_mask * 0.80) + 254 * (cloud_mask * 0.80)
+    day[..., 2] = day[..., 2] * (1 - cloud_mask * 0.80) + 255 * (cloud_mask * 0.80)
+    sun_d = np.sqrt(((xx - 720.0) / 1.4) ** 2 + (yy - 145.0) ** 2)
+    sun_glow = np.exp(-sun_d / 36.0) * 155.0
+    day = np.clip(day + sun_glow[..., None] * np.array([1.0, 0.95, 0.82]), 0, 255)
+    Image.fromarray(day.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_day_equirect.png"), format="PNG")
+
+    # 2. Golden Hour Sunset
+    sunset = np.zeros((H, W, 3), dtype=np.float32)
+    sunset[..., 0] = np.where(above, 26 * (1 - t_up) + 254 * (t_up ** 1.5), 54)
+    sunset[..., 1] = np.where(above, 44 * (1 - t_up) + 154 * (t_up ** 1.7), 44)
+    sunset[..., 2] = np.where(above, 102 * (1 - t_up) + 96 * (t_up ** 1.2), 58)
+    sun_d2 = np.sqrt(((xx - 760.0) / 1.6) ** 2 + (yy - 235.0) ** 2)
+    glow2 = np.exp(-sun_d2 / 52.0) * 165.0
+    sunset = np.clip(sunset + glow2[..., None] * np.array([1.0, 0.72, 0.35]), 0, 255)
+    Image.fromarray(sunset.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_sunset_equirect.png"), format="PNG")
+
+    # 3. Starry Night
+    night = np.zeros((H, W, 3), dtype=np.float32)
+    night[..., 0] = np.where(above, 6 * (1 - t_up) + 22 * t_up, 8)
+    night[..., 1] = np.where(above, 10 * (1 - t_up) + 32 * t_up, 10)
+    night[..., 2] = np.where(above, 28 * (1 - t_up) + 62 * t_up, 20)
+    for _ in range(440):
+        sx = int(RNG.integers(0, W))
+        sy = int(RNG.integers(10, int(H * 0.46)))
+        b = float(RNG.integers(160, 255))
+        night[sy, sx] = [b, b, min(255.0, b * 1.05)]
+    Image.fromarray(night.astype(np.uint8), mode="RGB").save(os.path.join(TEXTURES_DIR, "sky_night_equirect.png"), format="PNG")
+
+
 def generate_foliage_texture(path: str, base_rgb: tuple, highlight_rgb: tuple, pine_shape: bool = False):
     S = 512
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     cx = S // 2
-    for i in range(340):
-        t = i / 340.0
+    for i in range(360):
+        t = i / 360.0
         if pine_shape:
-            y = int(38 + t * 420)
-            half_w = int(18 + t * 192)
+            y = int(36 + t * 424)
+            half_w = int(16 + t * 194)
             x = int(cx + RNG.integers(-half_w, half_w + 1))
-            r = int(RNG.integers(12, 28))
+            r = int(RNG.integers(12, 26))
         else:
             ang = RNG.uniform(0, 2 * np.pi)
-            rad = np.sqrt(RNG.uniform(0, 1)) * 212
+            rad = np.sqrt(RNG.uniform(0, 1)) * 214
             x = int(cx + np.cos(ang) * rad)
-            y = int(245 + np.sin(ang) * rad * 0.88)
-            r = int(RNG.integers(15, 36))
+            y = int(244 + np.sin(ang) * rad * 0.88)
+            r = int(RNG.integers(14, 34))
         mix = RNG.uniform(0.0, 1.0)
         col = (
             int(base_rgb[0] * (1 - mix) + highlight_rgb[0] * mix),
             int(base_rgb[1] * (1 - mix) + highlight_rgb[1] * mix),
             int(base_rgb[2] * (1 - mix) + highlight_rgb[2] * mix),
-            248,
+            250,
         )
         draw.ellipse([x - r, y - r, x + r, y + r], fill=col)
-
     img.save(path, format="PNG")
 
 
@@ -166,30 +170,34 @@ def generate_textures():
     n_fine = fbm_noise(S, octaves=(16, 64, 256))
     yy, xx = np.mgrid[0:S, 0:S]
 
-    # 1. Asphalt & Roads (2-Lane & Wide 4-Lane Boulevard)
+    # 1. Realistic Asphalt & Multi-Lane Roads with Concrete Curbs
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
-    asphalt[..., 0] = 34 + n_base * 16 + n_fine * 10
-    asphalt[..., 1] = 36 + n_base * 16 + n_fine * 10
-    asphalt[..., 2] = 42 + n_base * 18 + n_fine * 12
-    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=4)
+    asphalt[..., 0] = 44 + n_base * 14 + n_fine * 8
+    asphalt[..., 1] = 46 + n_base * 14 + n_fine * 8
+    asphalt[..., 2] = 52 + n_base * 16 + n_fine * 10
+    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=3)
 
-    # 2-Lane Road: Clear yellow/white center line at S//2, left lane centered at S//4
+    # 2-Lane Road with raised concrete curbs at outer edges & clean lane markings
     road_2l = asphalt.copy()
-    road_2l[:, 14:30] = [240, 240, 234]
-    road_2l[:, S - 30:S - 14] = [240, 240, 234]
+    road_2l[:, 0:34] = [178, 180, 184]
+    road_2l[:, S - 34:S] = [178, 180, 184]
+    road_2l[:, 36:48] = [242, 242, 238]
+    road_2l[:, S - 48:S - 36] = [242, 242, 238]
     for y in range(0, S, 128):
-        road_2l[y:y + 68, S // 2 - 8:S // 2 + 8] = [248, 204, 42]
+        road_2l[y:y + 68, S // 2 - 7:S // 2 + 7] = [248, 206, 46]
     save_rgb_png(road_2l, os.path.join(TEXTURES_DIR, "road_2lane_albedo.png"))
 
-    # Wide 4-Lane Arterial Boulevard: Double yellow center divider + 2 lanes each direction
+    # Wide 4-Lane Arterial Boulevard with Median & 4 Lane Positions
     road_4l = asphalt.copy()
-    road_4l[:, 12:28] = [242, 242, 236]
-    road_4l[:, S - 28:S - 12] = [242, 242, 236]
-    road_4l[:, S // 2 - 16:S // 2 - 5] = [248, 192, 32]
-    road_4l[:, S // 2 + 5:S // 2 + 16] = [248, 192, 32]
+    road_4l[:, 0:30] = [178, 180, 184]
+    road_4l[:, S - 30:S] = [178, 180, 184]
+    road_4l[:, 32:44] = [244, 244, 240]
+    road_4l[:, S - 44:S - 32] = [244, 244, 240]
+    road_4l[:, S // 2 - 16:S // 2 - 5] = [248, 194, 34]
+    road_4l[:, S // 2 + 5:S // 2 + 16] = [248, 194, 34]
     for y in range(0, S, 128):
-        road_4l[y:y + 64, S // 4 - 6:S // 4 + 6] = [244, 244, 240]
-        road_4l[y:y + 64, (3 * S) // 4 - 6:(3 * S) // 4 + 6] = [244, 244, 240]
+        road_4l[y:y + 64, S // 4 - 5:S // 4 + 5] = [244, 244, 240]
+        road_4l[y:y + 64, (3 * S) // 4 - 5:(3 * S) // 4 + 5] = [244, 244, 240]
     save_rgb_png(road_4l, os.path.join(TEXTURES_DIR, "road_4lane_albedo.png"))
 
     # Intersection with Zebra Crossings
@@ -202,97 +210,113 @@ def generate_textures():
         inter[stripe_y:stripe_y + 36, S - 145:S - 38] = [244, 244, 240]
     save_rgb_png(inter, os.path.join(TEXTURES_DIR, "road_intersection_albedo.png"))
 
-    # 2. Sidewalk Paving
+    # 2. Architectural Sidewalk Paving
     checker = (((xx // 32) % 2) ^ ((yy // 32) % 2)).astype(np.float32)
     grout = ((xx % 32 < 3) | (yy % 32 < 3)).astype(np.float32)
     paving = np.zeros((S, S, 3), dtype=np.float32)
-    paving[..., 0] = np.where(checker > 0, 176, 136) + n_fine * 18 - grout * 46
-    paving[..., 1] = np.where(checker > 0, 94, 134) + n_fine * 16 - grout * 46
-    paving[..., 2] = np.where(checker > 0, 84, 132) + n_fine * 16 - grout * 46
+    paving[..., 0] = np.where(checker > 0, 196, 178) + n_fine * 12 - grout * 36
+    paving[..., 1] = np.where(checker > 0, 194, 176) + n_fine * 12 - grout * 36
+    paving[..., 2] = np.where(checker > 0, 188, 172) + n_fine * 12 - grout * 36
     save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"))
 
-    # 3. Ultra-Detailed Tropical Grass & Mountain Rock Strata Normal
+    # 3. High-Detail Lush Tropical Grass + Normal + Water Ripples
     grass = np.zeros((S, S, 3), dtype=np.float32)
-    blade_streaks = np.sin(xx * 0.45 + n_fine * 6.0) * 8.0
-    grass[..., 0] = 52 + n_base * 28 + n_fine * 16 + blade_streaks * 0.5
-    grass[..., 1] = 118 + n_base * 42 + n_fine * 22 + blade_streaks
-    grass[..., 2] = 44 + n_base * 20 + n_fine * 12
+    blade_streaks = np.sin(xx * 0.55 + n_fine * 7.0) * 7.0
+    grass[..., 0] = 68 + n_base * 26 + n_fine * 14 + blade_streaks * 0.4
+    grass[..., 1] = 142 + n_base * 36 + n_fine * 18 + blade_streaks
+    grass[..., 2] = 56 + n_base * 18 + n_fine * 10
     save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"))
-    save_rgb_png(generate_normal_from_height(n_fine, 4.4), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=4)
+    save_rgb_png(generate_normal_from_height(n_fine, 3.6), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=3)
 
-    # Multi-layered Water Ripples Normal
-    wave_h = np.sin(xx * 0.08 + n_base * 5.0) * 0.5 + np.cos(yy * 0.11 + n_fine * 4.0) * 0.5
-    save_rgb_png(generate_normal_from_height(wave_h, 3.6), os.path.join(TEXTURES_DIR, "water_normal.png"), micro_grain=3)
+    wave_h = np.sin(xx * 0.09 + n_base * 5.5) * 0.5 + np.cos(yy * 0.12 + n_fine * 4.5) * 0.5
+    save_rgb_png(generate_normal_from_height(wave_h, 4.0), os.path.join(TEXTURES_DIR, "water_normal.png"), micro_grain=2)
 
-    # 4. Terracotta Roof Tiles
-    tile_wave = np.sin((xx / 16.0) * np.pi) * 18.0
-    row_step = ((yy % 32) < 4).astype(np.float32) * 34.0
+    # 4. Terracotta Roof Tiles + Normal
+    tile_wave = np.sin((xx / 16.0) * np.pi) * 20.0
+    row_step = ((yy % 32) < 4).astype(np.float32) * 36.0
+    roof_h = (np.sin((xx / 16.0) * np.pi) * 0.5 + 0.5) - ((yy % 32) < 4).astype(np.float32) * 0.4
     roof = np.zeros((S, S, 3), dtype=np.float32)
-    roof[..., 0] = 180 + n_base * 20 + tile_wave - row_step
-    roof[..., 1] = 76 + n_base * 14 + tile_wave * 0.5 - row_step
-    roof[..., 2] = 52 + n_base * 10 - row_step * 0.6
+    roof[..., 0] = 188 + n_base * 18 + tile_wave - row_step
+    roof[..., 1] = 82 + n_base * 12 + tile_wave * 0.5 - row_step
+    roof[..., 2] = 56 + n_base * 10 - row_step * 0.6
     save_rgb_png(roof, os.path.join(TEXTURES_DIR, "roof_terracotta_albedo.png"))
+    save_rgb_png(generate_normal_from_height(roof_h, 4.5), os.path.join(TEXTURES_DIR, "roof_normal.png"), micro_grain=2)
 
-    # 5. Residential & High-Rise Glass Curtain Wall Facades
-    win_x = (xx % 64 >= 10) & (xx % 64 <= 54)
-    win_y = (yy % 64 >= 12) & (yy % 64 <= 52)
+    # 5. Architectural Curtain-Wall Glass & Concrete Mullions (Diffuse + Metalness + Roughness + Normal + Night Emissive!)
+    win_x = (xx % 64 >= 8) & (xx % 64 <= 56)
+    win_y = (yy % 64 >= 10) & (yy % 64 <= 54)
     is_window = win_x & win_y
+    mullion_bar = (xx % 32 >= 30) | (yy % 32 >= 30)
+    glass_pane = is_window & (~mullion_bar)
+
     cell_id = (xx // 64) * 31 + (yy // 64) * 17
-    lit_mask = is_window & ((cell_id % 4) != 0)
+    lit_mask = glass_pane & ((cell_id % 4) != 0)
 
-    house_wall = np.zeros((S, S, 3), dtype=np.float32)
-    house_wall[..., 0] = np.where(is_window, 44, 236 + n_base * 12)
-    house_wall[..., 1] = np.where(is_window, 68, 228 + n_base * 12)
-    house_wall[..., 2] = np.where(is_window, 94, 212 + n_base * 12)
-    house_wall[yy > 820, :] = [110, 114, 120]
-    save_rgb_png(house_wall, os.path.join(TEXTURES_DIR, "house_wall_albedo.png"))
-
+    # Sky-gradient reflection baked subtly into architectural glass panes
+    pane_v = ((yy % 64).astype(np.float32)) / 64.0
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
-    facade_day[..., 0] = np.where(is_window, 38, 196 + n_base * 18)
-    facade_day[..., 1] = np.where(is_window, 76, 198 + n_base * 18)
-    facade_day[..., 2] = np.where(is_window, 118, 200 + n_base * 18)
-    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"))
+    facade_day[..., 0] = np.where(glass_pane, 48 + pane_v * 34 + n_base * 12, 214 + n_base * 16)
+    facade_day[..., 1] = np.where(glass_pane, 98 + pane_v * 46 + n_base * 14, 216 + n_base * 16)
+    facade_day[..., 2] = np.where(glass_pane, 154 + pane_v * 52 + n_base * 16, 220 + n_base * 16)
+    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"), micro_grain=3)
+
+    # PBR Metalness & Roughness Maps: Glass = reflective/smooth, Concrete mullions = matte!
+    metal_map = np.where(glass_pane, 215.0, 18.0)
+    rough_map = np.where(glass_pane, 24.0 + n_fine * 14.0, 195.0 + n_fine * 24.0)
+    save_gray_png(metal_map, os.path.join(TEXTURES_DIR, "building_facade_metalness.png"))
+    save_gray_png(rough_map, os.path.join(TEXTURES_DIR, "building_facade_roughness.png"))
+
+    recess_h = np.where(glass_pane, 0.25, 0.85)
+    save_rgb_png(generate_normal_from_height(recess_h, 4.5), os.path.join(TEXTURES_DIR, "building_facade_normal.png"), micro_grain=2)
 
     facade_night = np.zeros((S, S, 3), dtype=np.float32)
-    facade_night[..., 0] = np.where(lit_mask, 255, 4)
-    facade_night[..., 1] = np.where(lit_mask, 210, 6)
-    facade_night[..., 2] = np.where(lit_mask, 118, 14)
-    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"))
+    facade_night[..., 0] = np.where(lit_mask, 255, 6)
+    facade_night[..., 1] = np.where(lit_mask, 214, 10)
+    facade_night[..., 2] = np.where(lit_mask, 124, 18)
+    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=2)
 
-    # 6. School / Civic Facade
+    # 6. Residential House Plaster & Wood Trim
+    house_wall = np.zeros((S, S, 3), dtype=np.float32)
+    house_wall[..., 0] = np.where(glass_pane, 48, 244 + n_base * 10)
+    house_wall[..., 1] = np.where(glass_pane, 76, 238 + n_base * 10)
+    house_wall[..., 2] = np.where(glass_pane, 106, 224 + n_base * 10)
+    house_wall[yy > 840, :] = [132, 134, 138]
+    save_rgb_png(house_wall, os.path.join(TEXTURES_DIR, "house_wall_albedo.png"), micro_grain=3)
+
+    # 7. School / Civic Facade
     school = np.zeros((S, S, 3), dtype=np.float32)
-    school[..., 0] = np.where(is_window, 48, 238 + n_base * 12)
-    school[..., 1] = np.where(is_window, 72, 232 + n_base * 12)
-    school[..., 2] = np.where(is_window, 96, 212 + n_base * 12)
-    school[yy % 128 < 14, :] = [168, 62, 42]
-    save_rgb_png(school, os.path.join(TEXTURES_DIR, "school_facade_albedo.png"))
+    school[..., 0] = np.where(glass_pane, 52, 244 + n_base * 10)
+    school[..., 1] = np.where(glass_pane, 78, 238 + n_base * 10)
+    school[..., 2] = np.where(glass_pane, 104, 220 + n_base * 10)
+    school[yy % 128 < 14, :] = [176, 66, 46]
+    save_rgb_png(school, os.path.join(TEXTURES_DIR, "school_facade_albedo.png"), micro_grain=3)
 
-    # 7. Kampung Warna-Warni
+    # 8. Kampung Warna-Warni
     stripe = (xx // 128) % 5
     palette = np.array([[228, 74, 78], [242, 192, 52], [54, 162, 218], [62, 188, 112], [236, 120, 56]], dtype=np.float32)
-    kampung = palette[stripe] + (n_fine[..., None] - 0.5) * 20.0
-    kampung[is_window] = [42, 48, 58]
-    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"))
+    kampung = palette[stripe] + (n_fine[..., None] - 0.5) * 16.0
+    kampung[glass_pane] = [44, 54, 68]
+    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=3)
 
-    # 8. Indomaret & Alfamart Franchises
-    indo = np.full((S, S, 3), [246, 248, 252], dtype=np.float32)
+    # 9. Indomaret & Alfamart Franchises
+    indo = np.full((S, S, 3), [248, 250, 254], dtype=np.float32)
     indo[0:105, :] = [218, 37, 29]
     indo[105:165, :] = [0, 91, 170]
     indo[165:205, :] = [255, 204, 0]
-    indo[340:920, 80:940] = [44, 74, 108]
-    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"))
+    indo[320:940, 70:950] = [52, 92, 136]
+    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=2)
 
-    alfa = np.full((S, S, 3), [248, 246, 244], dtype=np.float32)
+    alfa = np.full((S, S, 3), [250, 248, 246], dtype=np.float32)
     alfa[0:115, :] = [214, 30, 38]
     alfa[115:165, :] = [252, 198, 22]
     alfa[165:205, :] = [18, 72, 158]
-    alfa[340:920, 80:940] = [48, 72, 104]
-    save_rgb_png(alfa, os.path.join(TEXTURES_DIR, "alfamart_facade_albedo.png"))
+    alfa[320:940, 70:950] = [56, 88, 130]
+    save_rgb_png(alfa, os.path.join(TEXTURES_DIR, "alfamart_facade_albedo.png"), micro_grain=2)
 
-    # 9. Alpha-Cutout Foliage Textures
-    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tropical_foliage.png"), (30, 104, 38), (82, 176, 70), pine_shape=False)
-    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_pine_foliage.png"), (20, 78, 34), (54, 138, 64), pine_shape=True)
-    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tabebuya_foliage.png"), (214, 96, 140), (252, 174, 204), pine_shape=False)
+    # 10. Alpha-Cutout Foliage Textures
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tropical_foliage.png"), (34, 112, 42), (88, 184, 76), pine_shape=False)
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_pine_foliage.png"), (22, 84, 36), (58, 146, 68), pine_shape=True)
+    generate_foliage_texture(os.path.join(TEXTURES_DIR, "tree_tabebuya_foliage.png"), (218, 102, 146), (254, 180, 210), pine_shape=False)
 
 
 def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 22050):
@@ -333,4 +357,4 @@ if __name__ == "__main__":
     generate_sky_domes()
     generate_textures()
     generate_audio()
-    print("v6.0 Ultra-HD PBR Textures, Volumetric Sky Domes, Alfamart/Indomaret & Audio generated!")
+    print("v7.0 Next-Gen PBR Glass/Metalness Maps, Sky Domes, Foliage & Audio generated!")
