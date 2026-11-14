@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Rizzi Games (RG) - City Building : Nusantara Project
-Automated 3D Model (.obj), 2K PBR Texture (.png), Topographic Heightmap,
+Automated AppIcon, 3D Model (.obj), 2K PBR Texture (.png), Topographic Heightmap,
 and 44.1kHz Stereo Audio Generator for GitHub Actions iOS Build.
 """
 
@@ -10,20 +10,85 @@ import json
 import math
 import wave
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 BASE_DIR = "Resources"
 MODELS_DIR = os.path.join(BASE_DIR, "Models")
 TEXTURES_DIR = os.path.join(BASE_DIR, "Textures")
 MAPS_DIR = os.path.join(BASE_DIR, "Maps")
 AUDIO_DIR = os.path.join(BASE_DIR, "Audio")
+XCASSETS_DIR = "Assets.xcassets"
+APPICON_DIR = os.path.join(XCASSETS_DIR, "AppIcon.appiconset")
 
 RNG = np.random.default_rng(20261114)
 
 
 def ensure_dirs():
-    for d in [BASE_DIR, MODELS_DIR, TEXTURES_DIR, MAPS_DIR, AUDIO_DIR]:
+    for d in [BASE_DIR, MODELS_DIR, TEXTURES_DIR, MAPS_DIR, AUDIO_DIR, XCASSETS_DIR, APPICON_DIR]:
         os.makedirs(d, exist_ok=True)
+
+
+# ==============================================================================
+# 0. iOS HOME SCREEN APP ICON GENERATOR (REQUIRED BY iOS INSTALLD & ESIGN)
+# ==============================================================================
+
+def generate_app_icon():
+    print("[0/4] Generating iOS AppIcon.appiconset...")
+    size = 1024
+    img = Image.new("RGB", (size, size), (14, 24, 48))
+    draw = ImageDraw.Draw(img)
+
+    # Cozy Sunset-to-Night Sky Gradient
+    for y in range(size):
+        t = y / float(size)
+        r = int(18 * (1 - t) + 235 * (t ** 1.8) * 0.55)
+        g = int(32 * (1 - t) + 128 * (t ** 1.6) * 0.55)
+        b = int(68 * (1 - t) + 64 * (t ** 1.4) * 0.45)
+        draw.line([(0, y), (size, y)], fill=(min(255, r), min(255, g), min(255, b)))
+
+    # Glowing Golden Moon / Sun
+    draw.ellipse([650, 140, 860, 350], fill=(255, 214, 102))
+
+    # Gunung Arjuno Mountain Silhouette
+    draw.polygon([(0, 740), (310, 420), (620, 740)], fill=(26, 44, 68))
+    draw.polygon([(420, 740), (760, 460), (1024, 740)], fill=(20, 36, 58))
+
+    # City Skyline Towers with Cozy Warm Windows
+    towers = [
+        (90, 470, 230, 920),
+        (255, 360, 425, 920),
+        (450, 420, 610, 920),
+        (635, 330, 815, 920),
+        (835, 500, 955, 920),
+    ]
+    for x0, y0, x1, y1 in towers:
+        draw.rectangle([x0, y0, x1, y1], fill=(16, 24, 40))
+        for wy in range(y0 + 28, y1 - 40, 44):
+            for wx in range(x0 + 22, x1 - 24, 36):
+                if (wx + wy) % 3 != 0:
+                    draw.rectangle([wx, wy, wx + 18, wy + 24], fill=(255, 206, 94))
+
+    # Foreground Emerald Nusantara Hills & Road
+    draw.rectangle([0, 860, 1024, 1024], fill=(32, 38, 46))
+    draw.rectangle([0, 928, 1024, 944], fill=(245, 195, 45))
+
+    for px_size, fname in [(120, "icon_120.png"), (180, "icon_180.png"), (1024, "icon_1024.png")]:
+        resized = img.resize((px_size, px_size), Image.Resampling.LANCZOS)
+        resized.save(os.path.join(APPICON_DIR, fname), format="PNG")
+
+    with open(os.path.join(XCASSETS_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
+        json.dump({"info": {"author": "xcode", "version": 1}}, fp, indent=2)
+
+    appicon_contents = {
+        "images": [
+            {"filename": "icon_120.png", "idiom": "iphone", "scale": "2x", "size": "60x60"},
+            {"filename": "icon_180.png", "idiom": "iphone", "scale": "3x", "size": "60x60"},
+            {"filename": "icon_1024.png", "idiom": "ios-marketing", "scale": "1x", "size": "1024x1024"},
+        ],
+        "info": {"author": "xcode", "version": 1},
+    }
+    with open(os.path.join(APPICON_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
+        json.dump(appicon_contents, fp, indent=2)
 
 
 # ==============================================================================
@@ -65,7 +130,6 @@ def generate_all_textures():
     n_base = fbm_noise(S)
     n_fine = fbm_noise(S, octaves=(32, 128, 512, 1024), weights=(0.2, 0.3, 0.3, 0.2))
 
-    # Asphalt Albedo, Normal, Roughness
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
     asphalt[..., 0] = 36 + n_base * 22 + n_fine * 14
     asphalt[..., 1] = 38 + n_base * 22 + n_fine * 14
@@ -76,7 +140,6 @@ def generate_all_textures():
     rough = np.repeat(((0.35 + n_base * 0.45) * 255.0)[..., None], 3, axis=-1)
     save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"), micro_grain=14)
 
-    # Road 1-Way 2-Lane (Indonesian white edge lines + dashed center divider + directional arrows)
     road_1w2l = asphalt.copy()
     road_1w2l[:, 40:75] = [235, 235, 230]
     road_1w2l[:, S - 75:S - 40] = [235, 235, 230]
@@ -84,7 +147,6 @@ def generate_all_textures():
         road_1w2l[y:y + 130, S // 2 - 16:S // 2 + 16] = [245, 245, 240]
     save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"), micro_grain=16)
 
-    # Road 2-Way 4-Lane (Double yellow Indonesian center line + white lane dashes)
     road_2w4l = asphalt.copy()
     road_2w4l[:, 36:68] = [235, 235, 230]
     road_2w4l[:, S - 68:S - 36] = [235, 235, 230]
@@ -95,7 +157,6 @@ def generate_all_textures():
         road_2w4l[y:y + 128, (3 * S) // 4 - 12:(3 * S) // 4 + 12] = [240, 240, 235]
     save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"), micro_grain=16)
 
-    # Indonesian Sidewalk Paving Blocks (Trotoar merah-abu khas kota Indonesia)
     yy, xx = np.mgrid[0:S, 0:S]
     tile_x = (xx // 64) % 2
     tile_y = (yy // 64) % 2
@@ -109,7 +170,6 @@ def generate_all_textures():
     save_rgb_png(generate_normal_from_height(1.0 - grout * 0.6 + n_fine * 0.3, 4.5),
                  os.path.join(TEXTURES_DIR, "sidewalk_normal.png"), micro_grain=10)
 
-    # Dedicated Bike Lane (Jalur Pesepeda Hijau)
     bikelane = np.zeros((S, S, 3), dtype=np.float32)
     bikelane[..., 0] = 34 + n_fine * 20
     bikelane[..., 1] = 138 + n_fine * 28
@@ -118,7 +178,6 @@ def generate_all_textures():
     bikelane[:, S - 52:S - 24] = [245, 245, 245]
     save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"), micro_grain=16)
 
-    # Nusantara Lush Grass & Mountain Soil
     grass = np.zeros((S, S, 3), dtype=np.float32)
     grass[..., 0] = 44 + n_base * 34 + n_fine * 18
     grass[..., 1] = 108 + n_base * 48 + n_fine * 26
@@ -133,7 +192,6 @@ def generate_all_textures():
     save_rgb_png(soil, os.path.join(TEXTURES_DIR, "soil_mountain_albedo.png"), micro_grain=22)
     save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "soil_normal.png"), micro_grain=12)
 
-    # Foliage Textures (Pinus Malang, Trembesi Surabaya, Tabebuya Pink/Gold)
     pinus = np.stack([24 + n_fine * 25, 76 + n_base * 40 + n_fine * 24, 34 + n_fine * 20], axis=-1)
     save_rgb_png(pinus, os.path.join(TEXTURES_DIR, "foliage_pinus_albedo.png"), micro_grain=24)
 
@@ -147,7 +205,6 @@ def generate_all_textures():
     tabebuya[..., 2] = np.where(blossom_mask > 0, 196, 48) + n_fine * 18
     save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"), micro_grain=22)
 
-    # Building Day Facade & Cozy Night Window Emission
     win_x = (xx % 128 >= 24) & (xx % 128 <= 104)
     win_y = (yy % 128 >= 28) & (yy % 128 <= 100)
     is_window = win_x & win_y
@@ -167,25 +224,23 @@ def generate_all_textures():
     facade_night[..., 2] = np.where(lit_mask, np.where(warm_tone == 0, 128, 92), 18)
     save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=12)
 
-    # Kampung Warna-Warni Malang Facade (Vibrant multi-colored terraced houses)
     stripe = (xx // 256) % 5
     palette = np.array([
-        [235, 68, 74],    # Merah
-        [248, 196, 42],   # Kuning
-        [46, 168, 228],   # Biru
-        [56, 196, 112],   # Hijau
-        [242, 118, 48],   # Oranye
+        [235, 68, 74],
+        [248, 196, 42],
+        [46, 168, 228],
+        [56, 196, 112],
+        [242, 118, 48],
     ], dtype=np.float32)
     kampung = palette[stripe] + (n_fine[..., None] - 0.5) * 28.0
     kampung[is_window] = [42, 48, 58]
     save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=16)
 
-    # Indomaret Modern Retail Facade (Red, Blue, Yellow signature stripes)
     indo = np.full((S, S, 3), [242, 244, 248], dtype=np.float32)
-    indo[0:220, :] = [218, 37, 29]      # Red top band
-    indo[220:340, :] = [0, 91, 170]     # Blue middle band
-    indo[340:410, :] = [255, 204, 0]    # Yellow lower band
-    indo[700:1850, 180:1868] = [48, 76, 108]  # Storefront glass
+    indo[0:220, :] = [218, 37, 29]
+    indo[220:340, :] = [0, 91, 170]
+    indo[340:410, :] = [255, 204, 0]
+    indo[700:1850, 180:1868] = [48, 76, 108]
     save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=14)
 
 
@@ -301,7 +356,6 @@ class ObjBuilder:
 def generate_all_models():
     print("[2/4] Generating High-Detail 3D Models (.obj)...")
 
-    # 1. Pinus Malang (Multi-branch conifer with layered foliage tiers)
     pinus = ObjBuilder()
     pinus.set_group("trunk")
     pinus.add_cylinder(0, 0, 0, 0.28, 0.08, 6.2, segs=18)
@@ -317,7 +371,6 @@ def generate_all_models():
         pinus.add_cylinder(0, y - 0.1, 0, rad, rad * 0.15, 1.15, segs=20)
     pinus.write(os.path.join(MODELS_DIR, "tree_pinus_malang.obj"))
 
-    # 2. Trembesi Surabaya (Wide umbrella canopy shade tree)
     trembesi = ObjBuilder()
     trembesi.set_group("trunk")
     trembesi.add_cylinder(0, 0, 0, 0.42, 0.24, 3.2, segs=18)
@@ -332,7 +385,6 @@ def generate_all_models():
         trembesi.add_icosphere(math.cos(ang) * 1.9, 3.85, math.sin(ang) * 1.9, 1.5, 0.85, 1.5, rings=8, sectors=14)
     trembesi.write(os.path.join(MODELS_DIR, "tree_trembesi_surabaya.obj"))
 
-    # 3. Tabebuya Surabaya (Ornamental flowering street tree)
     tabebuya = ObjBuilder()
     tabebuya.set_group("trunk")
     tabebuya.add_cylinder(0, 0, 0, 0.22, 0.12, 2.8, segs=16)
@@ -340,14 +392,13 @@ def generate_all_models():
     tabebuya.add_icosphere(0, 3.5, 0, 2.1, 1.4, 2.1, rings=10, sectors=16)
     tabebuya.write(os.path.join(MODELS_DIR, "tree_tabebuya_surabaya.obj"))
 
-    # 4. Indonesian Motorcycle (Pemotor)
     motor = ObjBuilder()
     motor.set_group("wheels")
     motor.add_cylinder(0, 0.28, 0.62, 0.28, 0.28, 0.12, segs=16)
     motor.add_cylinder(0, 0.28, -0.62, 0.28, 0.28, 0.12, segs=16)
     motor.set_group("body")
     motor.add_box(0, 0.56, 0.0, 0.34, 0.36, 1.35)
-    motor.add_box(0, 0.95, 0.42, 0.64, 0.12, 0.16)  # Handlebar
+    motor.add_box(0, 0.95, 0.42, 0.64, 0.12, 0.16)
     motor.set_group("headlight")
     motor.add_box(0, 0.88, 0.54, 0.16, 0.14, 0.08)
     motor.set_group("rider")
@@ -355,7 +406,6 @@ def generate_all_models():
     motor.add_icosphere(0, 1.48, 0.02, 0.16, 0.18, 0.18, rings=8, sectors=12)
     motor.write(os.path.join(MODELS_DIR, "vehicle_motor.obj"))
 
-    # 5. Indonesian MPV / City Car (Mobil)
     car = ObjBuilder()
     car.set_group("body")
     car.add_box(0, 0.52, 0.0, 1.78, 0.58, 4.15)
@@ -370,7 +420,6 @@ def generate_all_models():
     car.add_box(0.62, 0.56, 2.08, 0.32, 0.16, 0.06)
     car.write(os.path.join(MODELS_DIR, "vehicle_mobil.obj"))
 
-    # 6. Bicycle & Cyclist (Pesepeda)
     bike = ObjBuilder()
     bike.set_group("wheels")
     bike.add_cylinder(0, 0.34, 0.58, 0.34, 0.34, 0.06, segs=16)
@@ -383,7 +432,6 @@ def generate_all_models():
     bike.add_icosphere(0, 1.52, 0.04, 0.15, 0.17, 0.17, rings=8, sectors=12)
     bike.write(os.path.join(MODELS_DIR, "vehicle_sepeda.obj"))
 
-    # 7. Detailed Human Pedestrian (Pejalan Kaki / Demonstran)
     ped = ObjBuilder()
     ped.set_group("legs")
     ped.add_box(-0.11, 0.42, 0, 0.14, 0.84, 0.16)
@@ -397,7 +445,6 @@ def generate_all_models():
     ped.add_icosphere(0, 1.56, 0, 0.14, 0.16, 0.15, rings=8, sectors=12)
     ped.write(os.path.join(MODELS_DIR, "npc_pedestrian.obj"))
 
-    # 8. Tropical Indonesian House & Kampung Warna-Warni
     for fname in ["building_house.obj", "building_kampung_warnawarni.obj"]:
         house = ObjBuilder()
         house.set_group("walls")
@@ -407,7 +454,6 @@ def generate_all_models():
         house.add_box(0, 4.10, 0, 3.4, 0.45, 3.8)
         house.write(os.path.join(MODELS_DIR, fname))
 
-    # 9. Indomaret Modern Retail Minimarket
     indo = ObjBuilder()
     indo.set_group("walls")
     indo.add_box(0, 2.2, 0, 6.8, 4.4, 5.6)
@@ -415,14 +461,12 @@ def generate_all_models():
     indo.add_box(0, 3.9, 3.1, 7.2, 0.95, 1.1)
     indo.write(os.path.join(MODELS_DIR, "building_indomaret.obj"))
 
-    # 10. Commercial High-Rise Tower
     tower = ObjBuilder()
     tower.set_group("walls")
     tower.add_box(0, 9.0, 0, 6.4, 18.0, 6.4)
     tower.add_box(0, 19.2, 0, 4.2, 2.4, 4.2)
     tower.write(os.path.join(MODELS_DIR, "building_highrise.obj"))
 
-    # 11. Educational Buildings (SD, SMP, SMA, Universitas)
     edu_specs = [
         ("edu_sd.obj", 8.0, 3.4, 6.0, False),
         ("edu_smp.obj", 10.0, 6.4, 7.0, False),
@@ -439,7 +483,6 @@ def generate_all_models():
             edu.add_icosphere(0, h + 1.8, 0, 2.6, 2.0, 2.6, rings=10, sectors=16)
         edu.write(os.path.join(MODELS_DIR, fname))
 
-    # 12. Gunung Arjuno Basecamp & Trail Gate
     basecamp = ObjBuilder()
     basecamp.set_group("walls")
     basecamp.add_box(0, 1.8, 0, 5.4, 3.6, 4.2)
@@ -451,7 +494,6 @@ def generate_all_models():
     basecamp.add_box(0, 4.2, 3.2, 5.2, 0.5, 0.5)
     basecamp.write(os.path.join(MODELS_DIR, "landmark_arjuno_basecamp.obj"))
 
-    # 13. Urban Streetlamp for Cozy Night Lights
     lamp = ObjBuilder()
     lamp.set_group("pole")
     lamp.add_cylinder(0, 0, 0, 0.12, 0.07, 4.6, segs=12)
@@ -471,7 +513,6 @@ def generate_nusantara_maps():
     yy, xx = np.mgrid[0:M, 0:M].astype(np.float32) / M
     terrain_noise = fbm_noise(M, octaves=(4, 16, 64, 256), weights=(0.5, 0.25, 0.15, 0.10))
 
-    # 1. MALANG: Highland basin surrounded by Gunung Arjuno (North) & Gunung Kawi (West) + Brantas River
     arjuno = np.exp(-(((xx - 0.52) ** 2) / 0.025 + ((yy - 0.14) ** 2) / 0.020)) * 0.72
     kawi = np.exp(-(((xx - 0.12) ** 2) / 0.022 + ((yy - 0.48) ** 2) / 0.030)) * 0.55
     semeru_east = np.exp(-(((xx - 0.92) ** 2) / 0.025 + ((yy - 0.62) ** 2) / 0.035)) * 0.60
@@ -479,13 +520,11 @@ def generate_nusantara_maps():
     brantas_valley = np.exp(-(((xx - brantas_curve) ** 2) / 0.0008)) * 0.14
     malang_h = np.clip(0.24 + arjuno + kawi + semeru_east + terrain_noise * 0.12 - brantas_valley, 0.04, 1.0)
 
-    # 2. SURABAYA: Flat coastal delta, Madura Strait (North-East sea), Kali Mas river, Southern hills
     sea_mask = np.clip((xx + (1.0 - yy) - 1.32) * 3.5, 0.0, 1.0)
     kalimas = np.exp(-(((xx - (0.52 + 0.04 * np.cos(yy * 8.0))) ** 2) / 0.0007)) * 0.08
     south_hills = np.clip((yy - 0.78) * 1.4, 0.0, 0.35)
     surabaya_h = np.clip(0.14 * (1.0 - sea_mask) + south_hills + terrain_noise * 0.05 - kalimas, 0.0, 1.0)
 
-    # 3. JAKARTA: Jakarta Bay (North), Ciliwung river, Southern Depok/Bogor gentle slope
     bay = np.clip((0.18 - yy) * 4.5 + 0.04 * np.sin(xx * 10.0), 0.0, 1.0)
     ciliwung = np.exp(-(((xx - (0.50 + 0.05 * np.sin(yy * 9.0))) ** 2) / 0.0007)) * 0.07
     south_slope = np.clip((yy - 0.55) * 0.55, 0.0, 0.32)
@@ -544,13 +583,12 @@ def generate_all_audio():
     print("[4/4] Generating 44.1kHz Stereo City & Cozy Night Audio (.wav)...")
     sr = 44100
 
-    # 1. Cozy Night City Vibes (32s warm ambient chords + soft evening breeze)
     t = np.linspace(0, 32.0, sr * 32, endpoint=False, dtype=np.float32)
     chords = [
-        (220.00, 261.63, 329.63, 392.00),  # Am7
-        (174.61, 220.00, 261.63, 329.63),  # Fmaj7
-        (130.81, 196.00, 246.94, 293.66),  # Cmaj9
-        (196.00, 246.94, 293.66, 349.23),  # G7
+        (220.00, 261.63, 329.63, 392.00),
+        (174.61, 220.00, 261.63, 329.63),
+        (130.81, 196.00, 246.94, 293.66),
+        (196.00, 246.94, 293.66, 349.23),
     ]
     pad_l = np.zeros_like(t)
     pad_r = np.zeros_like(t)
@@ -562,28 +600,24 @@ def generate_all_audio():
     breeze = RNG.normal(0.0, 0.015, size=t.shape).astype(np.float32)
     write_stereo_wav(os.path.join(AUDIO_DIR, "cozy_night_city.wav"), pad_l + breeze, pad_r + breeze, sr)
 
-    # 2. City Traffic Day (26s engine hum + urban ambience)
     t2 = np.linspace(0, 26.0, sr * 26, endpoint=False, dtype=np.float32)
     hum = 0.07 * np.sin(2 * np.pi * 68.0 * t2) + 0.04 * np.sin(2 * np.pi * 136.0 * t2)
     street_noise_l = RNG.normal(0.0, 0.045, size=t2.shape).astype(np.float32) + hum
     street_noise_r = RNG.normal(0.0, 0.045, size=t2.shape).astype(np.float32) + hum
     write_stereo_wav(os.path.join(AUDIO_DIR, "city_traffic_day.wav"), street_noise_l, street_noise_r, sr)
 
-    # 3. Mountain Wind & Rustling Leaves (24s)
     t3 = np.linspace(0, 24.0, sr * 24, endpoint=False, dtype=np.float32)
     swell = 0.5 + 0.4 * np.sin(2 * np.pi * 0.12 * t3)
     wind_l = RNG.normal(0.0, 0.055, size=t3.shape).astype(np.float32) * swell
     wind_r = RNG.normal(0.0, 0.055, size=t3.shape).astype(np.float32) * (1.0 - swell * 0.4)
     write_stereo_wav(os.path.join(AUDIO_DIR, "wind_leaves_mountain.wav"), wind_l, wind_r, sr)
 
-    # 4. Citizen Protest / Demo Ambience (16s)
     t4 = np.linspace(0, 16.0, sr * 16, endpoint=False, dtype=np.float32)
     chant = 0.09 * np.sin(2 * np.pi * 190.0 * t4) * (np.sin(2 * np.pi * 1.5 * t4) > 0).astype(np.float32)
     crowd_l = RNG.normal(0.0, 0.06, size=t4.shape).astype(np.float32) + chant
     crowd_r = RNG.normal(0.0, 0.06, size=t4.shape).astype(np.float32) + chant
     write_stereo_wav(os.path.join(AUDIO_DIR, "citizen_demo_crowd.wav"), crowd_l, crowd_r, sr)
 
-    # 5. Construction & UI Confirmation SFX (4s)
     t5 = np.linspace(0, 4.0, sr * 4, endpoint=False, dtype=np.float32)
     env = np.exp(-t5 * 1.8)
     chime = env * (0.22 * np.sin(2 * np.pi * 523.25 * t5) + 0.18 * np.sin(2 * np.pi * 659.25 * t5))
@@ -606,6 +640,7 @@ def write_manifest():
 
 if __name__ == "__main__":
     ensure_dirs()
+    generate_app_icon()
     generate_all_textures()
     generate_all_models()
     generate_nusantara_maps()
