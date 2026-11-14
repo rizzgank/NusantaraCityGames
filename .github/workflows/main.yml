@@ -52,19 +52,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Clean, Sign & Package CityBuildingNusantara.ipa
+      - name: Package Clean CityBuildingNusantara.ipa
         run: |
           rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
+          ditto --noextattr --noqtn build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/CityBuildingNusantara.app
           printf "APPL????" > Payload/CityBuildingNusantara.app/PkgInfo
           plutil -replace DTPlatformVersion -string "16.0" Payload/CityBuildingNusantara.app/Info.plist || true
           plutil -replace DTSDKName -string "iphoneos16.0" Payload/CityBuildingNusantara.app/Info.plist || true
-          chmod -R 755 Payload/CityBuildingNusantara.app
-          xattr -cr Payload/CityBuildingNusantara.app
-          /usr/bin/codesign --force --sign - --timestamp=none Payload/CityBuildingNusantara.app
-          /usr/bin/codesign --verify --deep --strict --verbose=2 Payload/CityBuildingNusantara.app
-          zip -r -y CityBuildingNusantara.ipa Payload
+          plutil -lint Payload/CityBuildingNusantara.app/Info.plist
+          file Payload/CityBuildingNusantara.app/CityBuildingNusantara
+          zip -r -X CityBuildingNusantara.ipa Payload
+          unzip -tq CityBuildingNusantara.ipa
           ls -lh CityBuildingNusantara.ipa
 
       - name: Upload IPA to GitHub Actions Artifacts
