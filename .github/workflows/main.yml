@@ -24,13 +24,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install XcodeGen, ldid & Image/Audio Libraries
+      - name: Install XcodeGen & Image/Audio Libraries
         run: |
-          brew install xcodegen ldid
+          brew install xcodegen
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate AppIcon, 3D Models, 2K Textures, Maps & Audio (100MB+)
+      - name: Generate AppIcon, 3D Models, HD Textures, Maps & Audio (100MB+)
         run: |
           python3 Scripts/generate_assets.py
           du -sh Resources Assets.xcassets
@@ -39,7 +39,7 @@ jobs:
         run: |
           xcodegen generate
 
-      - name: Build Unsigned Release App for iPhone
+      - name: Build Release App for iPhone
         run: |
           xcodebuild \
             -project CityBuildingNusantara.xcodeproj \
@@ -52,12 +52,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Sign with ldid & Package CityBuildingNusantara.ipa
+      - name: Clean, Sign & Package CityBuildingNusantara.ipa
         run: |
           rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          ldid -S Payload/CityBuildingNusantara.app/CityBuildingNusantara
+          printf "APPL????" > Payload/CityBuildingNusantara.app/PkgInfo
+          plutil -replace DTPlatformVersion -string "16.0" Payload/CityBuildingNusantara.app/Info.plist || true
+          plutil -replace DTSDKName -string "iphoneos16.0" Payload/CityBuildingNusantara.app/Info.plist || true
+          chmod -R 755 Payload/CityBuildingNusantara.app
+          xattr -cr Payload/CityBuildingNusantara.app
+          /usr/bin/codesign --force --sign - --timestamp=none Payload/CityBuildingNusantara.app
+          /usr/bin/codesign --verify --deep --strict --verbose=2 Payload/CityBuildingNusantara.app
           zip -r -y CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
 
