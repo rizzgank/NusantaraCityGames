@@ -25,8 +25,6 @@ final class NusantaraAISystem {
     // 1. AI GEBRAKAN WALIKOTA (PERENCANA PROYEK BEBAS & BLUEPRINT OTOMATIS)
     // =========================================================================
 
-    /// Menerjemahkan ide bebas apa pun dari Walikota menjadi analisis spasial peta
-    /// dan blueprint konstruksi bertahap yang siap dieksekusi di dunia 3D.
     func generateGebrakanPlan(
         prompt: String,
         cityMap: NusantaraCityMap,
@@ -37,7 +35,6 @@ final class NusantaraAISystem {
         let cleanedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = cleanedPrompt.lowercased()
 
-        // Deteksi kategori visi dari teks bebas pemain (mendukung segala macam ide kreatif)
         let isMountainTrail = lower.contains("gunung") || lower.contains("arjuno") ||
             lower.contains("pendakian") || lower.contains("hiking") || lower.contains("basecamp") ||
             lower.contains("alam") || lower.contains("bukit")
@@ -56,7 +53,6 @@ final class NusantaraAISystem {
 
         let occupied = buildOccupiedSet(roads: roads, structures: structures)
 
-        // Cari titik pusat lokasi paling ideal di peta berdasarkan jenis ide & kondisi kota
         let preferredOrigin: GridCoord
         let zoneName: String
 
@@ -77,7 +73,6 @@ final class NusantaraAISystem {
             preferredOrigin = GridCoord(x: 24, z: 26)
             zoneName = "Kawasan Terpadu Pendidikan & Inovasi Daerah"
         } else {
-            // Untuk ide bebas unik lainnya di luar pola umum
             preferredOrigin = findClusterCenter(structures: structures, fallback: GridCoord(x: 30, z: 30))
             zoneName = "Zona Pengembangan Strategis \(cityMap.displayName)"
         }
@@ -256,8 +251,7 @@ final class NusantaraAISystem {
             happinessGain = 18.0
 
         } else {
-            // Blueprint Adaptif Otomatis untuk Ide Bebas Apa Pun dari Pemain
-            let capitalizedTitle = cleanedPrompt.isEmpty
+            projectTitle = cleanedPrompt.isEmpty
                 ? "Gebrakan Penataan Kawasan Strategis"
                 : "Gebrakan: \(cleanedPrompt.prefix(44))"
 
@@ -334,8 +328,6 @@ final class NusantaraAISystem {
     // 2. AI AGENT (ASISTEN HARIAN WALIKOTA & KURATOR PERIZINAN INVESTASI)
     // =========================================================================
 
-    /// Menganalisis kondisi kota secara real-time dan memberikan solusi konkret
-    /// saat Walikota mengalami kendala (listrik, air, pendidikan, APBD, atau demo warga).
     func evaluateCityDiagnostics(
         cityMap: NusantaraCityMap,
         gameMode: GameMode,
@@ -346,7 +338,6 @@ final class NusantaraAISystem {
     ) -> [AIAgentAlert] {
         var alerts: [AIAgentAlert] = []
 
-        // 1. Cek Aksi Demonstrasi Aktif
         if let activeProtest = protests.first(where: { !$0.resolved }) {
             alerts.append(AIAgentAlert(
                 title: "Aksi Demo Warga di Koordinat (\(activeProtest.location.x), \(activeProtest.location.z))",
@@ -359,7 +350,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // 2. Cek Krisis Daya Listrik
         if stats.powerDemandMW > stats.powerSupplyMW {
             let deficit = stats.powerDemandMW - stats.powerSupplyMW
             alerts.append(AIAgentAlert(
@@ -372,7 +362,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // 3. Cek Krisis Air Bersih PDAM
         if stats.waterDemandML > stats.waterSupplyML {
             let deficit = stats.waterDemandML - stats.waterSupplyML
             alerts.append(AIAgentAlert(
@@ -385,7 +374,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // 4. Cek Kelengkapan Infrastruktur Awal (Kota Baru 0%)
         if roads.isEmpty && structures.isEmpty {
             alerts.append(AIAgentAlert(
                 title: "Selamat Bertugas, Pak/Bu Walikota \(cityMap.displayName)!",
@@ -397,7 +385,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // 5. Cek Ketersediaan Jenjang Pendidikan (SD, SMP, SMA, Universitas)
         if stats.population >= 180 {
             let hasSD = structures.contains { $0.structureType == .eduSD }
             let hasSMP = structures.contains { $0.structureType == .eduSMP }
@@ -443,7 +430,6 @@ final class NusantaraAISystem {
             }
         }
 
-        // 6. Cek Penghijauan Trotoar
         let unplantedRoads = roads.filter { $0.plantedTree == nil }.count
         if roads.count >= 4 && unplantedRoads > roads.count / 2 {
             alerts.append(AIAgentAlert(
@@ -456,7 +442,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // 7. Cek Kas APBD di Real Mode
         if gameMode == .real && stats.budgetIDR < 150_000_000 {
             alerts.append(AIAgentAlert(
                 title: "Peringatan Kas APBD Menipis",
@@ -482,8 +467,6 @@ final class NusantaraAISystem {
         return alerts
     }
 
-    /// Menghasilkan pengajuan izin investasi swasta baru (Indomaret, Gedung Komersial Tinggi, dll.)
-    /// yang wajib mendapat persetujuan Walikota sebelum dibangun.
     func generateIncomingPermitRequest(
         cityMap: NusantaraCityMap,
         roads: [PlacedRoad],
@@ -639,7 +622,6 @@ final class NusantaraAISystem {
     ) -> [CitizenProtest] {
         var updated = existingProtests
 
-        // Tandai demo selesai jika masalahnya sudah teratasi oleh Walikota
         for idx in updated.indices {
             if updated[idx].issueTitle.contains("Listrik") && stats.powerSupplyMW >= stats.powerDemandMW {
                 updated[idx].resolved = true
@@ -657,7 +639,6 @@ final class NusantaraAISystem {
             return updated.filter { !$0.resolved }
         }
 
-        // Demo akibat pemadaman listrik
         if stats.powerDemandMW > stats.powerSupplyMW &&
             !activeProtests.contains(where: { $0.issueTitle.contains("Listrik") }) {
             let crowd = Int(Double(max(45, stats.population / 3)) * difficulty.protestSensitivity)
@@ -670,7 +651,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // Demo akibat krisis air bersih
         if stats.waterDemandML > stats.waterSupplyML &&
             !activeProtests.contains(where: { $0.issueTitle.contains("Air") }) {
             let crowd = Int(Double(max(40, stats.population / 4)) * difficulty.protestSensitivity)
@@ -683,7 +663,6 @@ final class NusantaraAISystem {
             ))
         }
 
-        // Demo akibat kebahagiaan warga rendah
         if stats.population >= 180 && stats.happinessPercent < 48.0 &&
             !activeProtests.contains(where: { $0.issueTitle.contains("Fasilitas") }) {
             updated.append(CitizenProtest(
