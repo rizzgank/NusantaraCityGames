@@ -1,4 +1,4 @@
-﻿name: Build City Building Nusantara v4.0 Skylines HD IPA
+﻿name: Build City Building Nusantara v5.0 Visual Overhaul IPA
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
-      - name: Generate HD PBR Textures, Alpha Foliage, Audio & AppIcon
+      - name: Generate 360 Sky Domes, HD PBR Textures, Audio & AppIcon
         run: |
           rm -rf Resources GameAssets Assets.xcassets
           python3 Scripts/generate_assets.py
@@ -60,12 +60,12 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CityBuildingNusantara-v4-SkylinesHD-IPA
+          name: CityBuildingNusantara-v5-VisualOverhaul-IPA
           path: CityBuildingNusantara.ipa
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v4.0.${{ github.run_number }}
-          name: "City Building : Nusantara Project v4.0.${{ github.run_number }} (Skylines HD Edition)"
+          tag_name: v5.0.${{ github.run_number }}
+          name: "City Building : Nusantara Project v5.0.${{ github.run_number }} (Visual & UI Overhaul)"
           files: CityBuildingNusantara.ipa

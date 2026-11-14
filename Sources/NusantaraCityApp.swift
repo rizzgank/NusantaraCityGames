@@ -45,10 +45,9 @@ final class GameViewModel: ObservableObject {
     @Published var cDemand: Double = 0.50
     @Published var iDemand: Double = 0.45
 
-    @Published var isNight: Bool = false
-    @Published var isMuted: Bool = false
+    @Published var timePhase: TimeOfDayPhase = .day
     @Published var hideHUDForPhoto: Bool = false
-    @Published var touchToolMode: TouchToolMode = .buildBrush
+    @Published var showSubTray: Bool = true
     @Published var cameraMode: CameraMode = .drone
     @Published var lensMode: DataLensMode = .normal
 
@@ -66,29 +65,21 @@ final class GameViewModel: ObservableObject {
 
     @Published var settings = GameSettings()
     @Published var inspectCard: InspectCardData? = nil
-    @Published var dragCostPreview: String? = nil
-    @Published var aiAgentMessage: String = "Tarik garis jalan di tanah, lalu sapukan Kuas Zona (Hijau/Biru/Kuning) di pinggir jalan!"
+    @Published var anchorCoord: GridCoord? = nil
+    @Published var stagedCoords: [GridCoord] = []
+    @Published var stagedSummary: String? = nil
+
+    @Published var aiAgentMessage: String = "Ketuk titik awal & titik akhir di tanah untuk menarik Jalan atau Blok Zona!"
     @Published var accidentCoord: GridCoord? = nil
     @Published var toast: String? = nil
 
-    private var dragStartCoord: GridCoord? = nil
-    private var dragCurrentCoords: [GridCoord] = []
     private var undoStack: [UndoAction] = []
     let engine = City3DEngine()
     private var simTimer: Timer?
 
     init() {
         engine.onTileTapped = { [weak self] coord in
-            Task { @MainActor [weak self] in self?.handleSingleTap(coord) }
-        }
-        engine.onDragBegan = { [weak self] coord in
-            Task { @MainActor [weak self] in self?.handleDragBegan(coord) }
-        }
-        engine.onDragMoved = { [weak self] coord in
-            Task { @MainActor [weak self] in self?.handleDragMoved(coord) }
-        }
-        engine.onDragEnded = { [weak self] coord in
-            Task { @MainActor [weak self] in self?.handleDragEnded(coord) }
+            Task { @MainActor [weak self] in self?.handleGroundTap(coord) }
         }
         startSplashSequence()
     }
@@ -108,6 +99,7 @@ final class GameViewModel: ObservableObject {
     func enterMainMenu() {
         simTimer?.invalidate()
         simTimer = nil
+        clearSelection()
         inspectCard = nil
         hideHUDForPhoto = false
         engine.loadMap(.malang, showcaseDemo: true)
@@ -116,8 +108,8 @@ final class GameViewModel: ObservableObject {
 
     func startCity() {
         roads.removeAll(); plots.removeAll(); facilities.removeAll(); utilities.removeAll()
-        activeGebrakans.removeAll(); undoStack.removeAll()
-        accidentCoord = nil; inspectCard = nil; hideHUDForPhoto = false
+        activeGebrakans.removeAll(); undoStack.removeAll(); clearSelection()
+        accidentCoord = nil; inspectCard = nil; hideHUDForPhoto = false; showSubTray = true
         population = 0; educationIndex = 0; happiness = 85
         budgetIDR = selectedMode == .sandbox ? 999_999_999_999_999 : 150_000_000_000
 
@@ -125,14 +117,14 @@ final class GameViewModel: ObservableObject {
         engine.applyAtmosphere(shadows: settings.hdShadows, fog: settings.atmosphericFog, bloom: settings.hdrBloom)
         engine.cameraSensitivity = settings.cameraSensitivity
         screen = .inGame
-        aiAgentMessage = "1) Tarik jalan raya di tanah  2) Sapukan Kuas Zona di tepi jalan  3) Rumah otomatis tumbuh & naik Lv 1→5!"
+        aiAgentMessage = "Geser 1 jari untuk kamera • Cubit/putar 2 jari untuk zoom • Ketuk 2 titik untuk menarik Jalan/Zona!"
         startSimulationLoop()
     }
 
     // MARK: - Save & Load Multi-Slot
 
     func slotSnapshot(_ slot: Int) -> CitySaveSnapshot? {
-        guard let data = UserDefaults.standard.data(forKey: "nusantara.v4.slot.\(slot)") else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: "nusantara.v5.slot.\(slot)") else { return nil }
         return try? JSONDecoder().decode(CitySaveSnapshot.self, from: data)
     }
 
@@ -153,7 +145,7 @@ final class GameViewModel: ObservableObject {
             activeGebrakans: Array(activeGebrakans)
         )
         if let encoded = try? JSONEncoder().encode(snap) {
-            UserDefaults.standard.set(encoded, forKey: "nusantara.v4.slot.\(slot)")
+            UserDefaults.standard.set(encoded, forKey: "nusantara.v5.slot.\(slot)")
             showToast("Kota tersimpan di Slot \(slot)!")
         }
     }
@@ -171,7 +163,7 @@ final class GameViewModel: ObservableObject {
         facilities = Dictionary(uniqueKeysWithValues: snap.facilities.map { ($0.coord, $0) })
         utilities = Dictionary(uniqueKeysWithValues: snap.utilities.map { ($0.coord, $0) })
         activeGebrakans = Set(snap.activeGebrakans)
-        undoStack.removeAll()
+        undoStack.removeAll(); clearSelection()
 
         engine.loadMap(selectedMap, showcaseDemo: false)
         syncEngine()
@@ -181,7 +173,7 @@ final class GameViewModel: ObservableObject {
         showToast("Kota \(selectedMap.title) dari Slot \(slot) dimuat!")
     }
 
-    // MARK: - Tarik Jalan Geser Jari (Drag-to-Build) & Kuas Zona Otomatis
+    // MARK: - Sistem Tap-to-Anchor + Marquee Block Builder (Anti Salah Klik!)
 
     private func computeRoadPath(from a: GridCoord, to b: GridCoord) -> [GridCoord] {
         var result: [GridCoord] = [a]
@@ -198,6 +190,18 @@ final class GameViewModel: ObservableObject {
         return result
     }
 
+    private func computeMarqueeBox(from a: GridCoord, to b: GridCoord) -> [GridCoord] {
+        let minX = min(a.x, b.x), maxX = max(a.x, b.x)
+        let minZ = min(a.z, b.z), maxZ = max(a.z, b.z)
+        var list: [GridCoord] = []
+        for z in minZ...maxZ {
+            for x in minX...maxX {
+                list.append(GridCoord(x: x, z: z))
+            }
+        }
+        return list
+    }
+
     private func isNearRoad(_ c: GridCoord) -> Bool {
         for dz in -3...3 {
             for dx in -3...3 {
@@ -211,132 +215,27 @@ final class GameViewModel: ObservableObject {
         return false
     }
 
-    func handleDragBegan(_ coord: GridCoord) {
-        guard screen == .inGame else { return }
-        dragStartCoord = coord
-        dragCurrentCoords = [coord]
-        updatePreviewOverlay()
+    func clearSelection() {
+        anchorCoord = nil
+        stagedCoords = []
+        stagedSummary = nil
+        engine.updateSelectionPreview(coords: [], isValid: true, tint: .cyan)
     }
 
-    func handleDragMoved(_ coord: GridCoord) {
-        guard screen == .inGame, let start = dragStartCoord else { return }
-        if activeCategory == .roads {
-            dragCurrentCoords = computeRoadPath(from: start, to: coord)
-        } else if activeCategory == .zoning {
-            if !dragCurrentCoords.contains(coord) {
-                dragCurrentCoords.append(coord)
-            }
-        } else {
-            dragCurrentCoords = [coord]
-        }
-        updatePreviewOverlay()
-    }
-
-    func handleDragEnded(_ coord: GridCoord) {
-        guard screen == .inGame else { return }
-        let targets = dragCurrentCoords.isEmpty ? [coord] : dragCurrentCoords
-        dragStartCoord = nil
-        dragCurrentCoords = []
-        dragCostPreview = nil
-        engine.updateDragPreview(coords: [], isValid: true, tint: .cyan)
-
-        if activeCategory == .roads {
-            commitBatchRoads(targets)
-        } else if activeCategory == .zoning {
-            commitBatchZones(targets)
-        } else {
-            handleSingleTap(coord)
-        }
-    }
-
-    private func updatePreviewOverlay() {
-        guard !dragCurrentCoords.isEmpty else { return }
-        if activeCategory == .roads {
-            let validCoords = dragCurrentCoords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil }
-            let totalCost = Int64(validCoords.count) * selRoad.costIDR
-            dragCostPreview = "\(validCoords.count) Petak Jalan • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(totalCost))"
-            engine.updateDragPreview(coords: dragCurrentCoords, isValid: validCoords.count == dragCurrentCoords.count, tint: .cyan)
-        } else if activeCategory == .zoning {
-            let validCoords = dragCurrentCoords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && isNearRoad($0) }
-            let totalCost = Int64(validCoords.count) * selZoneBrush.costIDR
-            dragCostPreview = "\(selZoneBrush.title) (\(validCoords.count) Petak) • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(totalCost))"
-            let tint: UIColor = selZoneBrush == .commercial ? .systemBlue : (selZoneBrush == .industrialOffice ? .systemYellow : .systemGreen)
-            engine.updateDragPreview(coords: dragCurrentCoords, isValid: !validCoords.isEmpty, tint: tint)
-        }
-    }
-
-    private func commitBatchRoads(_ coords: [GridCoord]) {
-        let valid = coords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && roads[$0] == nil }
-        guard !valid.isEmpty else {
-            showToast("Lahan sudah terisi bangunan.")
-            return
-        }
-        let totalCost = Int64(valid.count) * selRoad.costIDR
-        guard spend(totalCost) else { return }
-
-        for (idx, c) in valid.enumerated() {
-            let yaw: Float = selRoad == .elasticCurve ? Float(idx % 4) * 0.25 : 0.0
-            roads[c] = RoadTile(coord: c, kind: selRoad, curveYaw: yaw)
-            if accidentCoord == c {
-                accidentCoord = nil
-                engine.showAccidentMarker(at: nil)
-            }
-        }
-        undoStack.append(.placedBatchRoads(valid, totalCost))
-        syncEngine()
-        NusantaraAssetBank.shared.playBuildSFX()
-        recalcStats()
-    }
-
-    private func commitBatchZones(_ coords: [GridCoord]) {
-        if selZoneBrush == .clearZone {
-            var cleared = 0
-            for c in coords {
-                if plots.removeValue(forKey: c) != nil { cleared += 1 }
-            }
-            if cleared > 0 {
-                syncEngine()
-                recalcStats()
-                showToast("Cat zona dihapus dari \(cleared) petak.")
-            }
-            return
-        }
-
-        let valid = coords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && plots[$0] == nil && isNearRoad($0) }
-        guard !valid.isEmpty else {
-            showToast("Sapukan Kuas Zona pada petak biru di tepi jalan!")
-            return
-        }
-        let totalCost = Int64(valid.count) * selZoneBrush.costIDR
-        guard spend(totalCost) else { return }
-
-        for c in valid {
-            let startLv = selZoneBrush == .parkGreen ? 1 : 0 // 0 = Mulai dengan Scaffolding Konstruksi!
-            let cap = selZoneBrush.capacity(forLevel: max(1, startLv))
-            plots[c] = ZonedPlot(coord: c, kind: selZoneBrush, buildingLevel: startLv, residents: 0, maxResidents: cap)
-        }
-        undoStack.append(.placedBatchZones(valid, totalCost))
-        syncEngine()
-        NusantaraAssetBank.shared.playBuildSFX()
-        recalcStats()
-    }
-
-    func handleSingleTap(_ coord: GridCoord) {
+    func handleGroundTap(_ coord: GridCoord) {
         guard screen == .inGame else { return }
 
-        // Tap-to-Inspect bangunan yang sudah berdiri
-        if activeCategory != .bulldoze {
+        // Tap-to-Inspect bangunan yang sudah berdiri jika belum mulai menarik pilihan baru
+        if anchorCoord == nil && activeCategory != .bulldoze {
             if let p = plots[coord] {
-                let stageText = p.buildingLevel == 0 ? "Sedang Konstruksi (Scaffolding)" : "Level \(p.buildingLevel) / 5"
+                let stageText = p.buildingLevel == 0 ? "Konstruksi (Scaffolding)" : "Level \(p.buildingLevel) / 5"
                 inspectCard = InspectCardData(
                     title: p.kind.title,
-                    subtitle: "\(stageText) • Koordinat (\(coord.x), \(coord.z))",
+                    subtitle: "\(stageText) • (\(coord.x), \(coord.z))",
                     details: [
-                        "Penghuni Riil: \(p.residents) / \(p.maxResidents) Jiwa",
-                        "Arsitektur: \(p.buildingLevel >= 3 ? "Bangunan Bertingkat / Modern" : "Bangunan Dasar")",
-                        "Listrik: \(p.hasPower ? "Menyala" : "Byarpet (Kurang Daya)")",
-                        "Air Bersih PDAM: \(p.hasWater ? "Tersedia" : "Kering")",
-                        "Pajak Bulanan: \(IDRFormat.string(p.kind.monthlyTaxIDR(level: p.buildingLevel)))"
+                        "Penghuni: \(p.residents) / \(p.maxResidents) Jiwa",
+                        "Listrik: \(p.hasPower ? "Menyala" : "Byarpet") • Air: \(p.hasWater ? "Ada" : "Kering")",
+                        "Pajak: \(IDRFormat.string(p.kind.monthlyTaxIDR(level: p.buildingLevel)))/bln"
                     ]
                 )
                 return
@@ -346,8 +245,7 @@ final class GameViewModel: ObservableObject {
                     subtitle: "Fasilitas Publik & Pendidikan",
                     details: [
                         "Status: Beroperasi Penuh",
-                        "Indeks Pendidikan: +\(f.kind.educationScore)%",
-                        "Mendorong Rumah Sekitar Naik Level 3–5"
+                        "Indeks Pendidikan: +\(f.kind.educationScore)%"
                     ]
                 )
                 return
@@ -356,13 +254,21 @@ final class GameViewModel: ObservableObject {
 
         inspectCard = nil
 
+        if activeCategory == .roads || activeCategory == .zoning {
+            if let start = anchorCoord {
+                // Ketuk kedua: bentangkan jalur jalan atau blok zona kotak!
+                let path = activeCategory == .roads ? computeRoadPath(from: start, to: coord) : computeMarqueeBox(from: start, to: coord)
+                stageSelection(path)
+            } else {
+                // Ketuk pertama: pasang titik jangkar awal (1 petak siap bangun)
+                anchorCoord = coord
+                stageSelection([coord])
+            }
+            return
+        }
+
+        // Penempatan langsung untuk Fasilitas, Utilitas & Hapus
         switch activeCategory {
-        case .roads:
-            commitBatchRoads([coord])
-
-        case .zoning:
-            commitBatchZones([coord])
-
         case .facilities:
             guard roads[coord] == nil && plots[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
                 showToast("Pilih lahan kosong untuk \(selFacility.title).")
@@ -371,7 +277,7 @@ final class GameViewModel: ObservableObject {
             guard spend(selFacility.costIDR) else { return }
             facilities[coord] = FacilityTile(coord: coord, kind: selFacility)
             undoStack.append(.placedFacility(coord, selFacility.costIDR))
-            aiAgentMessage = "\(selFacility.title) beroperasi! Rumah warga sekitar kini bisa berkembang ke Level 3–5."
+            aiAgentMessage = "\(selFacility.title) selesai dibangun!"
 
         case .utilities:
             guard roads[coord] == nil && plots[coord] == nil && facilities[coord] == nil && utilities[coord] == nil else {
@@ -381,11 +287,7 @@ final class GameViewModel: ObservableObject {
             guard spend(selUtility.costIDR) else { return }
             utilities[coord] = UtilityTile(coord: coord, kind: selUtility)
             undoStack.append(.placedUtility(coord, selUtility.costIDR))
-            aiAgentMessage = "\(selUtility.title) aktif menyuplai jaringan utilitas kota!"
-
-        case .gebrakans:
-            showToast("Pilih kartu Gebrakan di dock bawah untuk mengaktifkannya.")
-            return
+            aiAgentMessage = "\(selUtility.title) aktif menyuplai jaringan kota!"
 
         case .bulldoze:
             let removed = (roads.removeValue(forKey: coord) != nil) ||
@@ -399,6 +301,78 @@ final class GameViewModel: ObservableObject {
                 }
                 showToast("Objek dibongkar.")
             }
+
+        default:
+            break
+        }
+
+        syncEngine()
+        NusantaraAssetBank.shared.playBuildSFX()
+        recalcStats()
+    }
+
+    private func stageSelection(_ coords: [GridCoord]) {
+        stagedCoords = coords
+        if activeCategory == .roads {
+            let valid = coords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && roads[$0] == nil }
+            let cost = Int64(valid.count) * selRoad.costIDR
+            stagedSummary = "\(selRoad.title) (\(valid.count) Petak) • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(cost))"
+            engine.updateSelectionPreview(coords: coords, isValid: !valid.isEmpty, tint: .cyan)
+        } else if activeCategory == .zoning {
+            if selZoneBrush == .clearZone {
+                stagedSummary = "Hapus Zona (\(coords.count) Petak)"
+                engine.updateSelectionPreview(coords: coords, isValid: true, tint: .systemRed)
+            } else {
+                let valid = coords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && plots[$0] == nil && isNearRoad($0) }
+                let cost = Int64(valid.count) * selZoneBrush.costIDR
+                let tint: UIColor = selZoneBrush == .commercial ? .systemBlue : (selZoneBrush == .industrialOffice ? .systemYellow : .systemGreen)
+                stagedSummary = "\(selZoneBrush.title) (\(valid.count) Petak) • \(selectedMode == .sandbox ? "Gratis" : IDRFormat.string(cost))"
+                engine.updateSelectionPreview(coords: coords, isValid: !valid.isEmpty, tint: tint)
+            }
+        }
+    }
+
+    func confirmStagedBuild() {
+        let coords = stagedCoords
+        clearSelection()
+        guard !coords.isEmpty else { return }
+
+        if activeCategory == .roads {
+            let valid = coords.filter { plots[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && roads[$0] == nil }
+            guard !valid.isEmpty else { showToast("Lahan sudah terisi."); return }
+            let totalCost = Int64(valid.count) * selRoad.costIDR
+            guard spend(totalCost) else { return }
+
+            for (idx, c) in valid.enumerated() {
+                let yaw: Float = selRoad == .elasticCurve ? Float(idx % 4) * 0.25 : 0.0
+                roads[c] = RoadTile(coord: c, kind: selRoad, curveYaw: yaw)
+                if accidentCoord == c {
+                    accidentCoord = nil
+                    engine.showAccidentMarker(at: nil)
+                }
+            }
+            undoStack.append(.placedBatchRoads(valid, totalCost))
+        } else if activeCategory == .zoning {
+            if selZoneBrush == .clearZone {
+                var cleared = 0
+                for c in coords where plots.removeValue(forKey: c) != nil { cleared += 1 }
+                if cleared > 0 { showToast("Cat zona dihapus dari \(cleared) petak.") }
+            } else {
+                let valid = coords.filter { roads[$0] == nil && facilities[$0] == nil && utilities[$0] == nil && plots[$0] == nil && isNearRoad($0) }
+                guard !valid.isEmpty else {
+                    showToast("Pilih petak biru di tepi jalan!")
+                    return
+                }
+                let totalCost = Int64(valid.count) * selZoneBrush.costIDR
+                guard spend(totalCost) else { return }
+
+                for c in valid {
+                    let startLv = selZoneBrush == .parkGreen ? 1 : 0
+                    let cap = selZoneBrush.capacity(forLevel: max(1, startLv))
+                    plots[c] = ZonedPlot(coord: c, kind: selZoneBrush, buildingLevel: startLv, residents: 0, maxResidents: cap)
+                }
+                undoStack.append(.placedBatchZones(valid, totalCost))
+            }
         }
 
         syncEngine()
@@ -407,8 +381,13 @@ final class GameViewModel: ObservableObject {
     }
 
     func selectCategory(_ cat: BuildCategory) {
-        activeCategory = cat
-        touchToolMode = .buildBrush
+        if activeCategory == cat {
+            showSubTray.toggle()
+        } else {
+            activeCategory = cat
+            showSubTray = true
+        }
+        clearSelection()
         syncEngine()
     }
 
@@ -423,6 +402,7 @@ final class GameViewModel: ObservableObject {
     }
 
     func undoLastBuild() {
+        clearSelection()
         guard let last = undoStack.popLast() else {
             showToast("Tidak ada aksi untuk dibatalkan.")
             return
@@ -443,7 +423,7 @@ final class GameViewModel: ObservableObject {
         }
         syncEngine()
         recalcStats()
-        showToast("Pembangunan terakhir dibatalkan (APBD dikembalikan).")
+        showToast("Pembangunan terakhir dibatalkan.")
     }
 
     func triggerGebrakan(_ g: GebrakanKind) {
@@ -454,7 +434,7 @@ final class GameViewModel: ObservableObject {
         guard spend(g.costIDR) else { return }
         activeGebrakans.insert(g)
         recalcStats()
-        aiAgentMessage = "Gebrakan '\(g.title)' resmi diberlakukan ke seluruh kota!"
+        aiAgentMessage = "Gebrakan '\(g.title)' aktif!"
         showToast("Gebrakan Aktif: \(g.title)")
     }
 
@@ -526,21 +506,17 @@ final class GameViewModel: ObservableObject {
                     if connected && p.hasPower && p.hasWater {
                         p.isAbandoned = false
                         if p.buildingLevel == 0 {
-                            // Selesai tahap konstruksi scaffolding -> Jadi Bangunan Level 1!
                             p.buildingLevel = 1
                             p.maxResidents = p.kind.capacity(forLevel: 1)
                             visualChanged = true
                         } else if p.residents < p.maxResidents {
-                            // Warga pindah masuk secara bertahap
                             p.residents = min(p.maxResidents, p.residents + Int.random(in: 1...2))
                         } else if p.residents >= p.maxResidents && p.buildingLevel < maxAllowedLevel {
-                            // Bangunan penuh & layanan bagus -> Warga renovasi naik tingkat (Level 1 -> 5)!
                             p.buildingLevel += 1
                             p.maxResidents = p.kind.capacity(forLevel: p.buildingLevel)
                             visualChanged = true
                         }
                     } else {
-                        // Tanpa jalan / listrik / air -> Penghuni keluar & gedung terbengkalai
                         if p.residents > 0 {
                             p.residents = max(0, p.residents - 1)
                         } else if p.buildingLevel > 0 && !p.isAbandoned {
@@ -551,7 +527,6 @@ final class GameViewModel: ObservableObject {
                     self.plots[key] = p
                 }
 
-                // Pajak riil sesuai okupansi & level bangunan
                 if self.selectedMode == .real {
                     let mult: Double = self.activeGebrakans.contains(.digitalUmkm) ? 1.25 : 1.0
                     let tax = self.plots.values.reduce(Int64(0)) { acc, p in
@@ -562,18 +537,17 @@ final class GameViewModel: ObservableObject {
                     self.budgetIDR += tax
                 }
 
-                // Insiden kecelakaan lalu lintas & respon darurat
                 let hasEmergency = self.facilities.values.contains { $0.kind == .kantorPolisi || $0.kind == .rsud }
                 if self.accidentCoord == nil, self.roads.count >= 7, !hasEmergency, let r = self.roads.values.randomElement() {
                     self.accidentCoord = r.coord
                     self.engine.showAccidentMarker(at: r.coord)
-                    self.aiAgentMessage = "DARURAT! Kecelakaan lalu lintas di (\(r.coord.x), \(r.coord.z)). Bangun RSUD / Kantor Polisi!"
+                    self.aiAgentMessage = "DARURAT! Kecelakaan di (\(r.coord.x), \(r.coord.z)). Bangun RSUD / Polisi!"
                 } else if self.accidentCoord != nil && hasEmergency {
                     self.accidentCoord = nil
                     self.engine.showAccidentMarker(at: nil)
-                    self.aiAgentMessage = "Ambulans RSUD & Polisi mengevakuasi kecelakaan lalu lintas!"
+                    self.aiAgentMessage = "Ambulans RSUD & Polisi mengevakuasi kecelakaan!"
                 } else if self.powerDemand > self.powerSupply && self.selectedMode == .real {
-                    self.aiAgentMessage = "Byarpet! Daya listrik kurang (\(self.powerSupply)/\(self.powerDemand) MW). Bangun Gardu Induk!"
+                    self.aiAgentMessage = "Byarpet! Listrik kurang (\(self.powerSupply)/\(self.powerDemand) MW). Bangun Gardu Listrik!"
                 }
 
                 if visualChanged {
@@ -584,9 +558,10 @@ final class GameViewModel: ObservableObject {
         }
     }
 
-    func toggleNight() {
-        isNight = engine.toggleNightMode()
+    func cycleTime() {
+        timePhase = engine.cycleTimePhase()
         syncEngine()
+        showToast(timePhase.title)
     }
 
     func switchCameraMode(_ mode: CameraMode) {
@@ -609,13 +584,13 @@ final class GameViewModel: ObservableObject {
 
     private func showToast(_ msg: String) {
         toast = msg
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
             if self?.toast == msg { self?.toast = nil }
         }
     }
 }
 
-// MARK: - Antarmuka Pengguna (Splash, Menu Utama 4 Tombol, Alur Bertingkat, HUD Skylines)
+// MARK: - Antarmuka Pengguna (Strict iPhone Safe-Area Eye-Comfort HUD)
 
 struct RootGameView: View {
     @StateObject private var vm = GameViewModel()
@@ -625,7 +600,7 @@ struct RootGameView: View {
             if vm.screen == .splashTitle || vm.screen == .splashStudio {
                 Color(red: 0.04, green: 0.06, blue: 0.12).ignoresSafeArea()
             } else {
-                SceneKitViewport(engine: vm.engine, interactive: vm.screen == .inGame, touchToolMode: vm.touchToolMode)
+                SceneKitViewport(engine: vm.engine, interactive: vm.screen == .inGame)
                     .ignoresSafeArea()
             }
 
@@ -645,7 +620,7 @@ struct RootGameView: View {
             case .settingsMenu:
                 settingsView
             case .inGame:
-                inGameHUD
+                inGameSafeHUD
             }
         }
     }
@@ -657,12 +632,12 @@ struct RootGameView: View {
                 .tracking(3)
                 .foregroundColor(.cyan)
             Text("City Building : Nusantara Project")
-                .font(.system(size: 34, weight: .black, design: .rounded))
+                .font(.system(size: 32, weight: .black, design: .rounded))
                 .foregroundColor(.white)
             Text("Ketuk layar untuk melewati")
                 .font(.caption2)
                 .foregroundColor(.gray)
-                .padding(.top, 20)
+                .padding(.top, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -672,12 +647,12 @@ struct RootGameView: View {
     private var splashStudioView: some View {
         VStack(spacing: 14) {
             Text("RG")
-                .font(.system(size: 58, weight: .black, design: .rounded))
+                .font(.system(size: 54, weight: .black, design: .rounded))
                 .foregroundColor(.white)
-                .padding(.horizontal, 26)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: 20)
+                    RoundedRectangle(cornerRadius: 18)
                         .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
                 )
             Text("RIZZI GAMES")
@@ -691,31 +666,33 @@ struct RootGameView: View {
     }
 
     private var mainMenuView: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("RIZZI GAMES (RG)")
-                    .font(.caption.bold())
-                    .tracking(2)
-                    .foregroundColor(.cyan)
-                Text("City Building :\nNusantara Project")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+        GeometryReader { geo in
+            HStack {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("RIZZI GAMES (RG)")
+                        .font(.caption.bold())
+                        .tracking(2)
+                        .foregroundColor(.cyan)
+                    Text("City Building :\nNusantara Project")
+                        .font(.system(size: 24, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+
+                    Spacer()
+
+                    menuButton(title: "START", icon: "play.fill", primary: true) { vm.screen = .selectMode }
+                    menuButton(title: "SAVE GAME", icon: "folder.fill", primary: false) { vm.screen = .saveSlots }
+                    menuButton(title: "SETTINGS", icon: "gearshape.fill", primary: false) { vm.screen = .settingsMenu }
+                    menuButton(title: "EXIT", icon: "power", primary: false) { exit(0) }
+                }
+                .padding(20)
+                .frame(width: 280)
+                .background(.ultraThinMaterial)
+                .cornerRadius(20)
+                .padding(.leading, max(geo.safeAreaInsets.leading, 20))
+                .padding(.vertical, 16)
 
                 Spacer()
-
-                menuButton(title: "START", icon: "play.fill", primary: true) { vm.screen = .selectMode }
-                menuButton(title: "SAVE GAME", icon: "folder.fill", primary: false) { vm.screen = .saveSlots }
-                menuButton(title: "SETTINGS", icon: "gearshape.fill", primary: false) { vm.screen = .settingsMenu }
-                menuButton(title: "EXIT", icon: "power", primary: false) { exit(0) }
             }
-            .padding(24)
-            .frame(width: 310)
-            .background(.ultraThinMaterial)
-            .cornerRadius(22)
-            .padding(.leading, 28)
-            .padding(.vertical, 20)
-
-            Spacer()
         }
     }
 
@@ -725,63 +702,63 @@ struct RootGameView: View {
                 .font(.subheadline.bold())
                 .foregroundColor(primary ? .black : .white)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
                 .background(primary ? Color.cyan : Color.white.opacity(0.14))
-                .cornerRadius(12)
+                .cornerRadius(11)
         }
     }
 
     private var selectModeView: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             Text("TAHAP 1 : PILIH MODE PERMAINAN")
                 .font(.headline.bold())
                 .tracking(2)
                 .foregroundColor(.cyan)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 ForEach(PlayMode.allCases) { mode in
                     Button { vm.selectedMode = mode } label: {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(mode.title).font(.title3.bold())
+                            Text(mode.title).font(.headline.bold())
                             Text(mode.subtitle).font(.caption).multilineTextAlignment(.leading)
                         }
                         .foregroundColor(.white)
-                        .padding(18)
-                        .frame(width: 265, height: 135, alignment: .topLeading)
+                        .padding(16)
+                        .frame(width: 250, height: 125, alignment: .topLeading)
                         .background(vm.selectedMode == mode ? Color.cyan.opacity(0.35) : Color.black.opacity(0.55))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(vm.selectedMode == mode ? Color.cyan : Color.white.opacity(0.2), lineWidth: 2))
-                        .cornerRadius(16)
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(vm.selectedMode == mode ? Color.cyan : Color.white.opacity(0.2), lineWidth: 2))
+                        .cornerRadius(14)
                     }
                 }
             }
 
             HStack(spacing: 14) {
                 Button("Kembali") { vm.screen = .mainMenu }
-                    .padding(.horizontal, 20).padding(.vertical, 10)
+                    .padding(.horizontal, 18).padding(.vertical, 9)
                     .background(Color.white.opacity(0.16)).cornerRadius(10)
 
                 Button("Lanjut Pilih Map →") { vm.screen = .selectMap }
                     .font(.subheadline.bold())
                     .foregroundColor(.black)
-                    .padding(.horizontal, 24).padding(.vertical, 10)
+                    .padding(.horizontal, 22).padding(.vertical, 9)
                     .background(Color.cyan).cornerRadius(10)
             }
             .foregroundColor(.white)
         }
-        .padding(28)
+        .padding(24)
         .background(.ultraThinMaterial)
-        .cornerRadius(24)
+        .cornerRadius(22)
     }
 
     private var selectMapView: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             Text("TAHAP 2 : PILIH WILAYAH MAP NUSANTARA")
                 .font(.headline.bold())
                 .tracking(2)
                 .foregroundColor(.cyan)
 
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 ForEach(CityMapType.allCases) { m in
                     Button { vm.selectedMap = m } label: {
                         VStack(alignment: .leading, spacing: 6) {
@@ -790,43 +767,43 @@ struct RootGameView: View {
                             Text(m.subtitle).font(.caption).multilineTextAlignment(.leading)
                         }
                         .foregroundColor(.white)
-                        .padding(16)
-                        .frame(width: 215, height: 145, alignment: .topLeading)
+                        .padding(14)
+                        .frame(width: 205, height: 135, alignment: .topLeading)
                         .background(vm.selectedMap == m ? Color.green.opacity(0.35) : Color.black.opacity(0.55))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(vm.selectedMap == m ? Color.green : Color.white.opacity(0.2), lineWidth: 2))
-                        .cornerRadius(16)
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(vm.selectedMap == m ? Color.green : Color.white.opacity(0.2), lineWidth: 2))
+                        .cornerRadius(14)
                     }
                 }
             }
 
             HStack(spacing: 14) {
                 Button("← Mode") { vm.screen = .selectMode }
-                    .padding(.horizontal, 20).padding(.vertical, 10)
+                    .padding(.horizontal, 18).padding(.vertical, 9)
                     .background(Color.white.opacity(0.16)).cornerRadius(10)
 
                 Button("MULAI BANGUN KOTA") { vm.startCity() }
                     .font(.subheadline.bold())
                     .foregroundColor(.black)
-                    .padding(.horizontal, 26).padding(.vertical, 10)
+                    .padding(.horizontal, 24).padding(.vertical, 9)
                     .background(Color.green).cornerRadius(10)
             }
             .foregroundColor(.white)
         }
-        .padding(28)
+        .padding(24)
         .background(.ultraThinMaterial)
-        .cornerRadius(24)
+        .cornerRadius(22)
     }
 
     private var saveSlotsView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             Text("SAVE GAME SLOTS")
                 .font(.headline.bold())
                 .foregroundColor(.cyan)
 
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 ForEach(1...3, id: \.self) { slot in
                     let snap = vm.slotSnapshot(slot)
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text("Slot \(slot)").font(.headline.bold())
                         if let snap {
                             Text(snap.mapType.title).font(.subheadline).foregroundColor(.cyan)
@@ -838,7 +815,7 @@ struct RootGameView: View {
                                 .font(.caption.bold())
                                 .foregroundColor(.black)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 7)
+                                .padding(.vertical, 6)
                                 .background(Color.cyan)
                                 .cornerRadius(8)
                         } else {
@@ -847,25 +824,25 @@ struct RootGameView: View {
                         }
                     }
                     .foregroundColor(.white)
-                    .padding(14)
-                    .frame(width: 195, height: 165, alignment: .topLeading)
+                    .padding(12)
+                    .frame(width: 185, height: 155, alignment: .topLeading)
                     .background(Color.black.opacity(0.6))
-                    .cornerRadius(14)
+                    .cornerRadius(12)
                 }
             }
 
             Button("Tutup") { vm.screen = .mainMenu }
                 .foregroundColor(.white)
-                .padding(.horizontal, 24).padding(.vertical, 9)
+                .padding(.horizontal, 22).padding(.vertical, 8)
                 .background(Color.white.opacity(0.16)).cornerRadius(10)
         }
-        .padding(24)
+        .padding(22)
         .background(.ultraThinMaterial)
-        .cornerRadius(22)
+        .cornerRadius(20)
     }
 
     private var settingsView: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Text("PENGATURAN GRAFIS HD & AUDIO")
                 .font(.headline.bold())
                 .foregroundColor(.cyan)
@@ -891,265 +868,313 @@ struct RootGameView: View {
             }
             .font(.subheadline.bold())
             .foregroundColor(.black)
-            .padding(.horizontal, 24).padding(.vertical, 10)
+            .padding(.horizontal, 22).padding(.vertical, 9)
             .background(Color.cyan).cornerRadius(10)
         }
         .foregroundColor(.white)
-        .padding(24)
-        .frame(width: 430)
+        .padding(22)
+        .frame(width: 410)
         .background(.ultraThinMaterial)
-        .cornerRadius(22)
+        .cornerRadius(20)
     }
 
-    private var inGameHUD: some View {
-        ZStack {
-            if vm.hideHUDForPhoto {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button { vm.hideHUDForPhoto = false } label: {
-                            Label("Tampilkan HUD", systemImage: "eye.fill")
-                                .font(.caption.bold())
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(.ultraThinMaterial)
-                                .cornerRadius(10)
-                        }
-                    }
-                    .padding()
-                    Spacer()
-                }
-            } else {
-                VStack(spacing: 6) {
-                    // Bar Atas
-                    HStack(spacing: 7) {
-                        Button { vm.enterMainMenu() } label: {
-                            Image(systemName: "house.fill").padding(8).background(.ultraThinMaterial).cornerRadius(9)
-                        }
-                        rciDemandMeter
-                        statBadge(title: "APBD", val: IDRFormat.string(vm.budgetIDR), col: .green)
-                        statBadge(title: "Penduduk", val: "\(vm.population) Jiwa", col: .cyan)
-                        statBadge(title: "Listrik", val: "\(vm.powerSupply)/\(vm.powerDemand)", col: vm.powerSupply >= vm.powerDemand ? .yellow : .red)
-                        statBadge(title: "Air", val: "\(vm.waterSupply)/\(vm.waterDemand)", col: vm.waterSupply >= vm.waterDemand ? .blue : .red)
-                        statBadge(title: "Bahagia", val: "\(vm.happiness)%", col: .orange)
+    // Strict Safe-Area HUD (Anti Bentrok Notch / Bezel / Home Indicator!)
+    private var inGameSafeHUD: some View {
+        GeometryReader { geo in
+            let safeLeft = max(geo.safeAreaInsets.leading, 18)
+            let safeRight = max(geo.safeAreaInsets.trailing, 18)
+            let safeTop = max(geo.safeAreaInsets.top, 8)
+            let safeBottom = max(geo.safeAreaInsets.bottom, 10)
 
-                        Spacer()
-
-                        Button {
-                            vm.touchToolMode = (vm.touchToolMode == .buildBrush) ? .panCamera : .buildBrush
-                        } label: {
-                            Label(vm.touchToolMode.title, systemImage: vm.touchToolMode.icon)
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 7)
-                                .background(vm.touchToolMode == .buildBrush ? Color.cyan.opacity(0.45) : Color.orange.opacity(0.55))
-                                .cornerRadius(9)
-                        }
-
-                        Button { vm.cycleLensMode() } label: {
-                            Image(systemName: "eye.trianglebadge.exclamationmark")
-                                .padding(8).background(.ultraThinMaterial).cornerRadius(9)
-                        }
-                        Button { vm.toggleNight() } label: {
-                            Image(systemName: vm.isNight ? "moon.stars.fill" : "sun.max.fill")
-                                .foregroundColor(vm.isNight ? .yellow : .orange)
-                                .padding(8).background(.ultraThinMaterial).cornerRadius(9)
-                        }
-                        Button { vm.hideHUDForPhoto = true } label: {
-                            Image(systemName: "camera.fill").padding(8).background(.ultraThinMaterial).cornerRadius(9)
-                        }
-                        Button { vm.saveToSlot(1) } label: {
-                            Image(systemName: "square.and.arrow.down.fill").padding(8).background(.ultraThinMaterial).cornerRadius(9)
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                    // AI Agent "Nusa" Bar
-                    HStack(spacing: 8) {
-                        Image(systemName: "sparkles").foregroundColor(.cyan)
-                        Text("AI Nusa: \(vm.aiAgentMessage)")
-                            .font(.caption.bold())
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.68))
-                    .cornerRadius(9)
-                    .padding(.horizontal, 12)
-
-                    if let preview = vm.dragCostPreview {
-                        Text(preview)
-                            .font(.caption.bold())
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 14).padding(.vertical, 5)
-                            .background(Color.cyan)
-                            .cornerRadius(12)
-                    } else if let t = vm.toast {
-                        Text(t)
-                            .font(.caption.bold())
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Color.blue.opacity(0.88))
-                            .cornerRadius(12)
-                    }
-
-                    // Tengah: Kartu Inspeksi Warga/Bangunan & Kontrol Kamera
-                    HStack(alignment: .top) {
-                        if let card = vm.inspectCard {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(card.title).font(.subheadline.bold()).foregroundColor(.cyan)
-                                    Spacer()
-                                    Button { vm.inspectCard = nil } label: {
-                                        Image(systemName: "xmark.circle.fill").foregroundColor(.gray)
-                                    }
-                                }
-                                Text(card.subtitle).font(.caption2).foregroundColor(.gray)
-                                ForEach(card.details, id: \.self) { line in
-                                    Text("• \(line)").font(.caption2).foregroundColor(.white)
-                                }
+            ZStack {
+                if vm.hideHUDForPhoto {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button { vm.hideHUDForPhoto = false } label: {
+                                Label("Tampilkan UI", systemImage: "eye.fill")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(12)
                             }
-                            .padding(12)
-                            .frame(width: 255)
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, safeTop)
+                    .padding(.trailing, safeRight)
+                } else {
+                    VStack(spacing: 6) {
+                        // Top Bar: 2 Kapsul Kaca Ramping di Dalam Safe Area
+                        HStack(spacing: 8) {
+                            // Kapsul Kiri
+                            HStack(spacing: 8) {
+                                Button { vm.enterMainMenu() } label: {
+                                    Image(systemName: "house.fill")
+                                        .font(.caption.bold())
+                                        .padding(6)
+                                        .background(Color.white.opacity(0.14))
+                                        .cornerRadius(7)
+                                }
+                                rciDemandMeter
+                                compactStat(label: "APBD", value: IDRFormat.string(vm.budgetIDR), color: .green)
+                                compactStat(label: "Warga", value: "\(vm.population)", color: .cyan)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
                             .background(.ultraThinMaterial)
                             .cornerRadius(14)
-                            .padding(.leading, 12)
+
+                            Spacer()
+
+                            // Kapsul Kanan
+                            HStack(spacing: 8) {
+                                compactStat(label: "MW", value: "\(vm.powerSupply)/\(vm.powerDemand)", color: vm.powerSupply >= vm.powerDemand ? .yellow : .red)
+                                compactStat(label: "Air", value: "\(vm.waterSupply)/\(vm.waterDemand)", color: vm.waterSupply >= vm.waterDemand ? .blue : .red)
+
+                                Button { vm.cycleLensMode() } label: {
+                                    Image(systemName: "eye.trianglebadge.exclamationmark").font(.caption.bold())
+                                }
+                                Button { vm.cycleTime() } label: {
+                                    Image(systemName: vm.timePhase.icon)
+                                        .font(.caption.bold())
+                                        .foregroundColor(vm.timePhase == .night ? .yellow : .orange)
+                                }
+                                Button { vm.hideHUDForPhoto = true } label: {
+                                    Image(systemName: "camera.fill").font(.caption.bold())
+                                }
+                                Button { vm.saveToSlot(1) } label: {
+                                    Image(systemName: "square.and.arrow.down.fill").font(.caption.bold())
+                                }
+                            }
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(14)
                         }
+                        .foregroundColor(.white)
 
-                        Spacer()
+                        // Bar AI Nusa Ringkas
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles").font(.caption2).foregroundColor(.cyan)
+                            Text(vm.aiAgentMessage)
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.55))
+                        .cornerRadius(8)
 
-                        VStack(spacing: 6) {
-                            ForEach(CameraMode.allCases) { cm in
-                                Button { vm.switchCameraMode(cm) } label: {
-                                    Image(systemName: cm.icon)
-                                        .frame(width: 34, height: 34)
-                                        .background(vm.cameraMode == cm ? Color.cyan.opacity(0.45) : Color.black.opacity(0.45))
+                        // Bar Konfirmasi Marquee Build (✓ Bangun / ✕ Batal)
+                        if let summary = vm.stagedSummary {
+                            HStack(spacing: 10) {
+                                Text(summary)
+                                    .font(.caption.bold())
+                                    .foregroundColor(.white)
+
+                                Button { vm.confirmStagedBuild() } label: {
+                                    Label("Bangun", systemImage: "checkmark")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 12).padding(.vertical, 5)
+                                        .background(Color.green)
+                                        .cornerRadius(8)
+                                }
+
+                                Button { vm.clearSelection() } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.white)
+                                        .padding(6)
+                                        .background(Color.red.opacity(0.75))
                                         .cornerRadius(8)
                                 }
                             }
-                            Button { vm.engine.zoomCamera(scaleFactor: 1.25) } label: {
-                                Image(systemName: "plus.magnifyingglass").frame(width: 34, height: 34).background(.ultraThinMaterial).cornerRadius(8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(12)
+                        } else if let t = vm.toast {
+                            Text(t)
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12).padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.85))
+                                .cornerRadius(10)
+                        }
+
+                        // Tengah: Kartu Inspeksi Warga (Kiri) & Tombol Kamera (Kanan)
+                        HStack(alignment: .top) {
+                            if let card = vm.inspectCard {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(card.title).font(.caption.bold()).foregroundColor(.cyan)
+                                        Spacer()
+                                        Button { vm.inspectCard = nil } label: {
+                                            Image(systemName: "xmark.circle.fill").font(.caption).foregroundColor(.gray)
+                                        }
+                                    }
+                                    Text(card.subtitle).font(.caption2).foregroundColor(.gray)
+                                    ForEach(card.details, id: \.self) { line in
+                                        Text("• \(line)").font(.caption2).foregroundColor(.white)
+                                    }
+                                }
+                                .padding(10)
+                                .frame(width: 225)
+                                .background(.ultraThinMaterial)
+                                .cornerRadius(12)
                             }
-                            Button { vm.engine.zoomCamera(scaleFactor: 0.8) } label: {
-                                Image(systemName: "minus.magnifyingglass").frame(width: 34, height: 34).background(.ultraThinMaterial).cornerRadius(8)
+
+                            Spacer()
+
+                            VStack(spacing: 6) {
+                                ForEach(CameraMode.allCases) { cm in
+                                    Button { vm.switchCameraMode(cm) } label: {
+                                        Image(systemName: cm.icon)
+                                            .font(.caption.bold())
+                                            .frame(width: 32, height: 32)
+                                            .background(vm.cameraMode == cm ? Color.cyan.opacity(0.5) : Color.black.opacity(0.45))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                Button { vm.engine.zoomCamera(scaleFactor: 1.25) } label: {
+                                    Image(systemName: "plus.magnifyingglass")
+                                        .font(.caption.bold())
+                                        .frame(width: 32, height: 32)
+                                        .background(.ultraThinMaterial)
+                                        .cornerRadius(8)
+                                }
+                                Button { vm.engine.zoomCamera(scaleFactor: 0.8) } label: {
+                                    Image(systemName: "minus.magnifyingglass")
+                                        .font(.caption.bold())
+                                        .frame(width: 32, height: 32)
+                                        .background(.ultraThinMaterial)
+                                        .cornerRadius(8)
+                                }
                             }
+                            .foregroundColor(.white)
+                        }
+
+                        Spacer()
+
+                        // Floating Sub-Tray (Bisa dilipat agar layar tetap lega)
+                        if vm.showSubTray && vm.activeCategory != .bulldoze {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 7) {
+                                    if vm.activeCategory == .roads {
+                                        ForEach(RoadKind.allCases) { k in
+                                            subItemButton(title: k.title, price: k.costIDR, selected: vm.selRoad == k, badgeColor: .cyan) {
+                                                vm.selRoad = k; vm.clearSelection()
+                                            }
+                                        }
+                                    } else if vm.activeCategory == .zoning {
+                                        ForEach(ZoneBrushKind.allCases) { z in
+                                            let zCol: Color = z == .commercial ? .blue : (z == .industrialOffice ? .yellow : (z == .clearZone ? .red : .green))
+                                            subItemButton(title: z.title, price: z.costIDR, selected: vm.selZoneBrush == z, badgeColor: zCol) {
+                                                vm.selZoneBrush = z; vm.clearSelection()
+                                            }
+                                        }
+                                    } else if vm.activeCategory == .facilities {
+                                        ForEach(FacilityKind.allCases) { k in
+                                            subItemButton(title: k.title, price: k.costIDR, selected: vm.selFacility == k, badgeColor: .cyan) {
+                                                vm.selFacility = k
+                                            }
+                                        }
+                                    } else if vm.activeCategory == .utilities {
+                                        ForEach(UtilityKind.allCases) { u in
+                                            subItemButton(title: u.title, price: u.costIDR, selected: vm.selUtility == u, badgeColor: .yellow) {
+                                                vm.selUtility = u
+                                            }
+                                        }
+                                    } else if vm.activeCategory == .gebrakans {
+                                        ForEach(GebrakanKind.allCases) { g in
+                                            subItemButton(
+                                                title: vm.activeGebrakans.contains(g) ? "✓ \(g.title)" : g.title,
+                                                price: g.costIDR,
+                                                selected: vm.activeGebrakans.contains(g),
+                                                badgeColor: .purple
+                                            ) { vm.triggerGebrakan(g) }
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                            }
+                            .padding(.vertical, 5)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(12)
+                        }
+
+                        // Dock Bawah 1 Baris Ramping di Dalam Safe Area
+                        HStack(spacing: 6) {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(BuildCategory.allCases) { cat in
+                                        Button { vm.selectCategory(cat) } label: {
+                                            Label(cat.title, systemImage: cat.icon)
+                                                .font(.caption2.bold())
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 7)
+                                                .background(vm.activeCategory == cat ? Color.blue : Color.white.opacity(0.14))
+                                                .cornerRadius(9)
+                                        }
+                                    }
+                                }
+                            }
+
                             Button { vm.undoLastBuild() } label: {
-                                Image(systemName: "arrow.uturn.backward").frame(width: 34, height: 34).background(Color.orange.opacity(0.65)).cornerRadius(8)
+                                Image(systemName: "arrow.uturn.backward")
+                                    .font(.caption.bold())
+                                    .padding(8)
+                                    .background(Color.orange.opacity(0.65))
+                                    .cornerRadius(9)
                             }
                         }
                         .foregroundColor(.white)
-                        .padding(.trailing, 12)
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(14)
                     }
-
-                    Spacer()
-
-                    // Dock Pembangunan Bawah (Tarik Jalan & Kuas Zona Skylines)
-                    VStack(spacing: 6) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                if vm.activeCategory == .roads {
-                                    ForEach(RoadKind.allCases) { k in
-                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selRoad == k, badgeColor: .cyan) { vm.selRoad = k }
-                                    }
-                                } else if vm.activeCategory == .zoning {
-                                    ForEach(ZoneBrushKind.allCases) { z in
-                                        let zCol: Color = z == .commercial ? .blue : (z == .industrialOffice ? .yellow : (z == .clearZone ? .red : .green))
-                                        subItemButton(title: z.title, price: z.costIDR, selected: vm.selZoneBrush == z, badgeColor: zCol) { vm.selZoneBrush = z }
-                                    }
-                                } else if vm.activeCategory == .facilities {
-                                    ForEach(FacilityKind.allCases) { k in
-                                        subItemButton(title: k.title, price: k.costIDR, selected: vm.selFacility == k, badgeColor: .cyan) { vm.selFacility = k }
-                                    }
-                                } else if vm.activeCategory == .utilities {
-                                    ForEach(UtilityKind.allCases) { u in
-                                        subItemButton(title: u.title, price: u.costIDR, selected: vm.selUtility == u, badgeColor: .yellow) { vm.selUtility = u }
-                                    }
-                                } else if vm.activeCategory == .gebrakans {
-                                    ForEach(GebrakanKind.allCases) { g in
-                                        subItemButton(
-                                            title: vm.activeGebrakans.contains(g) ? "✓ \(g.title)" : g.title,
-                                            price: g.costIDR,
-                                            selected: vm.activeGebrakans.contains(g),
-                                            badgeColor: .purple
-                                        ) { vm.triggerGebrakan(g) }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 6)
-                        }
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(BuildCategory.allCases) { cat in
-                                    Button { vm.selectCategory(cat) } label: {
-                                        Label(cat.title, systemImage: cat.icon)
-                                            .font(.caption.bold())
-                                            .padding(.horizontal, 11)
-                                            .padding(.vertical, 7)
-                                            .background(vm.activeCategory == cat ? Color.blue : Color.white.opacity(0.14))
-                                            .cornerRadius(9)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .padding(9)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(15)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+                    .padding(.leading, safeLeft)
+                    .padding(.trailing, safeRight)
+                    .padding(.top, safeTop)
+                    .padding(.bottom, safeBottom)
                 }
             }
         }
     }
 
     private var rciDemandMeter: some View {
-        HStack(alignment: .bottom, spacing: 3) {
-            demandBar(height: vm.rDemand, color: .green)
-            demandBar(height: vm.cDemand, color: .blue)
-            demandBar(height: vm.iDemand, color: .yellow)
+        HStack(alignment: .bottom, spacing: 2) {
+            RoundedRectangle(cornerRadius: 1.5).fill(Color.green).frame(width: 4, height: max(4, CGFloat(vm.rDemand) * 16))
+            RoundedRectangle(cornerRadius: 1.5).fill(Color.blue).frame(width: 4, height: max(4, CGFloat(vm.cDemand) * 16))
+            RoundedRectangle(cornerRadius: 1.5).fill(Color.yellow).frame(width: 4, height: max(4, CGFloat(vm.iDemand) * 16))
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
-        .cornerRadius(8)
     }
 
-    private func demandBar(height: Double, color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(color)
-            .frame(width: 5, height: max(5, CGFloat(height) * 20))
+    private func compactStat(label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label).font(.caption2).foregroundColor(.gray)
+            Text(value).font(.caption2.bold()).foregroundColor(color)
+        }
     }
 
     private func subItemButton(title: String, price: Int64, selected: Bool, badgeColor: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Text(title).font(.caption.bold())
+            VStack(spacing: 1) {
+                Text(title).font(.caption2.bold())
                 Text(vm.selectedMode == .sandbox || price == 0 ? "Gratis" : IDRFormat.string(price))
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .foregroundColor(badgeColor)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .background(selected ? badgeColor.opacity(0.32) : Color.black.opacity(0.65))
+            .background(selected ? badgeColor.opacity(0.32) : Color.black.opacity(0.60))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? badgeColor : Color.clear, lineWidth: 1.5))
             .cornerRadius(8)
         }
-    }
-
-    private func statBadge(title: String, val: String, col: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption2).foregroundColor(.gray)
-            Text(val).font(.caption.bold()).foregroundColor(col)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
-        .cornerRadius(8)
     }
 }

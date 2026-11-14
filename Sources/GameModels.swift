@@ -6,6 +6,30 @@ struct GridCoord: Hashable, Codable {
     let z: Int
 }
 
+enum TimeOfDayPhase: Int, CaseIterable, Codable {
+    case day = 0
+    case sunset = 1
+    case night = 2
+
+    var title: String {
+        switch self {
+        case .day: return "Siang Cerah"
+        case .sunset: return "Senja Golden Hour"
+        case .night: return "Malam City Lights"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .day: return "sun.max.fill"
+        case .sunset: return "sunset.fill"
+        case .night: return "moon.stars.fill"
+        }
+    }
+
+    var isLitTime: Bool { self == .sunset || self == .night }
+}
+
 enum CityMapType: String, CaseIterable, Identifiable, Codable {
     case malang, surabaya, jakarta
     var id: String { rawValue }
@@ -41,13 +65,6 @@ enum PlayMode: String, CaseIterable, Identifiable, Codable {
             ? "Modal awal Rp 150 Miliar, sistem kuas zona otomatis tumbuh Lv 1–5, pajak & utilitas riil"
             : "Anggaran APBD tak terbatas untuk bebas merancang tata kota impian"
     }
-}
-
-enum TouchToolMode: String, CaseIterable, Identifiable {
-    case buildBrush, panCamera
-    var id: String { rawValue }
-    var title: String { self == .buildBrush ? "Kuas / Tarik" : "Geser Kamera" }
-    var icon: String { self == .buildBrush ? "paintbrush.pointed.fill" : "hand.draw.fill" }
 }
 
 enum CameraMode: String, CaseIterable, Identifiable {
@@ -87,11 +104,11 @@ enum BuildCategory: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .roads: return "Tarik Jalan"
-        case .zoning: return "Kuas Zona"
-        case .facilities: return "Sekolah & Publik"
-        case .utilities: return "Listrik & Air"
-        case .gebrakans: return "Menu Gebrakan"
+        case .roads: return "Jalan"
+        case .zoning: return "Zona"
+        case .facilities: return "Publik"
+        case .utilities: return "Utilitas"
+        case .gebrakans: return "Gebrakan"
         case .bulldoze: return "Hapus"
         }
     }
@@ -115,7 +132,7 @@ enum RoadKind: String, CaseIterable, Identifiable, Codable {
         case .twoLane: return "Jalan 2 Lajur"
         case .fourLane: return "Jalan Arteri 4 Lajur"
         case .oneWay: return "Jalan 1 Arah"
-        case .elasticCurve: return "Jalan Elastis (Kurva)"
+        case .elasticCurve: return "Jalan Elastis"
         case .roundabout: return "Bundaran Alun-Alun"
         case .sidewalkTree: return "Trotoar & Pohon"
         }
@@ -133,18 +150,17 @@ enum RoadKind: String, CaseIterable, Identifiable, Codable {
     var isDriveable: Bool { self != .sidewalkTree }
 }
 
-// Sistem Kuas Zona ala Cities: Skylines (Tanpa tombol rumah manual!)
 enum ZoneBrushKind: String, CaseIterable, Identifiable, Codable {
     case residentialLow, residentialHigh, commercial, industrialOffice, parkGreen, clearZone
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .residentialLow: return "Hunian Rendah (Rumah)"
-        case .residentialHigh: return "Hunian Padat (Tingkat/Apt)"
+        case .residentialLow: return "Hunian Rendah"
+        case .residentialHigh: return "Hunian Padat"
         case .commercial: return "Komersial & Ruko"
         case .industrialOffice: return "Industri & Kantor"
         case .parkGreen: return "Taman & RTH"
-        case .clearZone: return "Hapus Cat Zona"
+        case .clearZone: return "Hapus Zona"
         }
     }
     var costIDR: Int64 {
@@ -159,16 +175,10 @@ enum ZoneBrushKind: String, CaseIterable, Identifiable, Codable {
     }
     func capacity(forLevel level: Int) -> Int {
         switch self {
-        case .residentialLow:
-            // Lv 1: 2-3 jiwa, Lv 3 (rumah 2 tingkat): 4-6 jiwa, Lv 5: 7 jiwa
-            return 2 + level
-        case .residentialHigh:
-            // Lv 1: 8 jiwa, Lv 3: 16 jiwa, Lv 5 (apartemen tinggi): 26 jiwa
-            return 4 + level * 4
-        case .commercial:
-            return 2 + level
-        case .industrialOffice, .parkGreen, .clearZone:
-            return 0
+        case .residentialLow: return 2 + level
+        case .residentialHigh: return 4 + level * 4
+        case .commercial: return 2 + level
+        case .industrialOffice, .parkGreen, .clearZone: return 0
         }
     }
     func jobSlots(forLevel level: Int) -> Int {
@@ -221,9 +231,9 @@ enum FacilityKind: String, CaseIterable, Identifiable, Codable {
         case .smpUnggulan: return "SMP Unggulan"
         case .smaKejuruan: return "SMA / SMK"
         case .universitas: return "Universitas"
-        case .rsud: return "RSUD (Kesehatan)"
+        case .rsud: return "RSUD"
         case .kantorPolisi: return "Kantor Polisi"
-        case .pemadam: return "Pemadam Kebakaran"
+        case .pemadam: return "Pemadam"
         }
     }
     var costIDR: Int64 {
@@ -253,7 +263,7 @@ enum UtilityKind: String, CaseIterable, Identifiable, Codable {
     case garduListrik, menaraPDAM
     var id: String { rawValue }
     var title: String {
-        self == .garduListrik ? "Gardu Induk Listrik (+80 MW)" : "Instalasi Air PDAM (+80 m³)"
+        self == .garduListrik ? "Gardu Listrik (+80 MW)" : "Menara PDAM (+80 m³)"
     }
     var costIDR: Int64 {
         self == .garduListrik ? 3_500_000_000 : 2_800_000_000
@@ -267,7 +277,7 @@ enum GebrakanKind: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .jumatBersih: return "Jumat Bersih (+10% Bahagia)"
         case .digitalUmkm: return "Digitalisasi UMKM (+25% Pajak)"
-        case .subsidiAngkot: return "Subsidi Angkot & Bus (-Macet)"
+        case .subsidiAngkot: return "Subsidi Angkot (-Macet)"
         case .beasiswaKampus: return "Beasiswa Kampus (+Riset)"
         }
     }
@@ -292,7 +302,7 @@ struct ZonedPlot: Identifiable, Codable {
     var id: String { "\(coord.x)_\(coord.z)" }
     let coord: GridCoord
     var kind: ZoneBrushKind
-    var buildingLevel: Int // 0 = Konstruksi Scaffolding, 1..5 = Tumbuh & Naik Tingkat Otomatis
+    var buildingLevel: Int
     var residents: Int
     var maxResidents: Int
     var hasPower: Bool = true
