@@ -9,11 +9,11 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-      - path: Resources
+      - path: GameAssets
         type: folder
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.nusantara.citybuilding3d
+        PRODUCT_BUNDLE_IDENTIFIER: com.nusantara.citybuilding3dv2
         PRODUCT_NAME: CityBuildingNusantara
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"

@@ -71,8 +71,8 @@ final class GameSessionViewModel: ObservableObject {
 
     private var simulationTimer: Timer?
     private var tickCounter: Int = 0
-    private let savesStorageKey = "com.nusantara.citybuilding3d.saves.v1"
-    private let settingsStorageKey = "com.nusantara.citybuilding3d.settings.v1"
+    private let savesStorageKey = "com.nusantara.citybuilding3dv2.saves.v1"
+    private let settingsStorageKey = "com.nusantara.citybuilding3dv2.settings.v1"
 
     init() {
         loadPersistedSettings()
