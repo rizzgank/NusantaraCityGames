@@ -4,23 +4,17 @@ import Combine
 
 // MARK: - Titik Masuk Utama Aplikasi iOS (UIKit AppDelegate)
 
-@MainActor
 @main
-final class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
-    private var viewModel: GameSessionViewModel?
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        let sessionVM = GameSessionViewModel()
-        self.viewModel = sessionVM
-
-        let rootView = RootGameContainerView(viewModel: sessionVM)
-            .preferredColorScheme(.dark)
-
         let window = UIWindow(frame: UIScreen.main.bounds)
+        let rootView = RootGameContainerView(viewModel: GameSessionViewModel())
+            .preferredColorScheme(.dark)
         window.rootViewController = UIHostingController(rootView: rootView)
         window.makeKeyAndVisible()
         self.window = window
@@ -77,8 +71,8 @@ final class GameSessionViewModel: ObservableObject {
 
     private var simulationTimer: Timer?
     private var tickCounter: Int = 0
-    private let savesStorageKey = "com.rizzigames.citybuildingnusantara.saves.v1"
-    private let settingsStorageKey = "com.rizzigames.citybuildingnusantara.settings.v1"
+    private let savesStorageKey = "com.nusantara.citybuilding3d.saves.v1"
+    private let settingsStorageKey = "com.nusantara.citybuilding3d.settings.v1"
 
     init() {
         loadPersistedSettings()
