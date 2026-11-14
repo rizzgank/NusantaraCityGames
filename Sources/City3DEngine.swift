@@ -2,6 +2,73 @@
 import UIKit
 import SceneKit
 import SwiftUI
+import AVFoundation
+
+// MARK: - Safe Asset Loader (Anti-Crash Fallback)
+
+final class NusantaraAssetBank {
+    static let shared = NusantaraAssetBank()
+
+    private var imageCache: [String: UIImage] = [:]
+    private var bgmPlayer: AVAudioPlayer?
+    private var sfxPlayer: AVAudioPlayer?
+    var isMuted: Bool = false {
+        didSet {
+            bgmPlayer?.volume = isMuted ? 0.0 : 0.42
+        }
+    }
+
+    private init() {
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    func texture(_ filename: String) -> UIImage? {
+        if let cached = imageCache[filename] {
+            return cached
+        }
+        let stem = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        if let url = Bundle.main.url(forResource: stem, withExtension: ext, subdirectory: "GameAssets/Textures"),
+           let img = UIImage(contentsOfFile: url.path) {
+            imageCache[filename] = img
+            return img
+        }
+        return nil
+    }
+
+    func playBGM(night: Bool, map: CityMapType) {
+        let track = night ? "cozy_night_city" : (map == .malang ? "wind_leaves_mountain" : "city_traffic_day")
+        guard let url = Bundle.main.url(forResource: track, withExtension: "wav", subdirectory: "GameAssets/Audio") else {
+            return
+        }
+        if bgmPlayer?.url == url && bgmPlayer?.isPlaying == true {
+            return
+        }
+        bgmPlayer?.stop()
+        if let player = try? AVAudioPlayer(contentsOf: url) {
+            player.numberOfLoops = -1
+            player.volume = isMuted ? 0.0 : 0.42
+            player.prepareToPlay()
+            player.play()
+            bgmPlayer = player
+        }
+    }
+
+    func playBuildSFX() {
+        guard !isMuted,
+              let url = Bundle.main.url(forResource: "build_construct_sfx", withExtension: "wav", subdirectory: "GameAssets/Audio") else {
+            return
+        }
+        if let player = try? AVAudioPlayer(contentsOf: url) {
+            player.volume = 0.65
+            player.play()
+            sfxPlayer = player
+        }
+    }
+}
+
+// MARK: - SceneKit 3D Engine (PBR Textures + Safe Geometry)
 
 final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
@@ -97,6 +164,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         buildTerrain(for: mapType)
         applyAtmosphere()
+        NusantaraAssetBank.shared.playBGM(night: isNightMode, map: mapType)
 
         if showcaseDemo {
             buildShowcaseCity()
@@ -105,12 +173,13 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
     private func buildTerrain(for mapType: CityMapType) {
         let boardSpan = CGFloat(gridHalfExtent * 2 + 1) * CGFloat(tileSize)
+        let bank = NusantaraAssetBank.shared
 
         let outerPlane = SCNPlane(width: 240, height: 240)
         let outerMat = SCNMaterial()
         outerMat.diffuse.contents = mapType == .malang
-            ? UIColor(red: 0.16, green: 0.34, blue: 0.18, alpha: 1.0)
-            : UIColor(red: 0.07, green: 0.28, blue: 0.48, alpha: 1.0)
+            ? UIColor(red: 0.14, green: 0.32, blue: 0.16, alpha: 1.0)
+            : UIColor(red: 0.06, green: 0.28, blue: 0.48, alpha: 1.0)
         outerPlane.materials = [outerMat]
         let outerNode = SCNNode(geometry: outerPlane)
         outerNode.eulerAngles.x = -.pi / 2
@@ -119,10 +188,21 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         let groundBox = SCNBox(width: boardSpan, height: 0.3, length: boardSpan, chamferRadius: 0.0)
         let groundMat = SCNMaterial()
-        groundMat.diffuse.contents = mapType == .malang
-            ? UIColor(red: 0.24, green: 0.49, blue: 0.23, alpha: 1.0)
-            : UIColor(red: 0.28, green: 0.52, blue: 0.26, alpha: 1.0)
-        groundMat.roughness.contents = 0.9
+        if let grassTex = bank.texture("grass_nusantara_albedo.png") {
+            groundMat.diffuse.contents = grassTex
+            groundMat.diffuse.contentsTransform = SCNMatrix4MakeScale(10, 10, 1)
+            groundMat.diffuse.wrapS = .repeat
+            groundMat.diffuse.wrapT = .repeat
+            if let grassNorm = bank.texture("grass_normal.png") {
+                groundMat.normal.contents = grassNorm
+                groundMat.normal.contentsTransform = SCNMatrix4MakeScale(10, 10, 1)
+                groundMat.normal.wrapS = .repeat
+                groundMat.normal.wrapT = .repeat
+            }
+        } else {
+            groundMat.diffuse.contents = UIColor(red: 0.24, green: 0.49, blue: 0.23, alpha: 1.0)
+        }
+        groundMat.roughness.contents = 0.88
         groundBox.materials = [groundMat]
         let groundNode = SCNNode(geometry: groundBox)
         groundNode.position = SCNVector3(0, -0.15, 0)
@@ -236,11 +316,16 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private func makeRoadNode(tile: RoadTile) -> SCNNode {
         let holder = SCNNode()
         let w = CGFloat(tileSize)
+        let bank = NusantaraAssetBank.shared
 
         if tile.kind == .sidewalkTree {
             let paving = SCNBox(width: w, height: 0.08, length: w, chamferRadius: 0)
             let pMat = SCNMaterial()
-            pMat.diffuse.contents = UIColor(red: 0.68, green: 0.64, blue: 0.58, alpha: 1.0)
+            if let tex = bank.texture("sidewalk_paving_albedo.png") {
+                pMat.diffuse.contents = tex
+            } else {
+                pMat.diffuse.contents = UIColor(red: 0.68, green: 0.64, blue: 0.58, alpha: 1.0)
+            }
             paving.materials = [pMat]
             let pNode = SCNNode(geometry: paving)
             pNode.position.y = 0.04
@@ -252,21 +337,19 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
 
         let asphalt = SCNBox(width: w, height: 0.06, length: w, chamferRadius: 0)
         let aMat = SCNMaterial()
-        aMat.diffuse.contents = UIColor(red: 0.16, green: 0.17, blue: 0.20, alpha: 1.0)
+        let texName = tile.kind == .fourLane ? "road_2way_4lane_albedo.png" : "road_1way_2lane_albedo.png"
+        if let tex = bank.texture(texName) {
+            aMat.diffuse.contents = tex
+            if let norm = bank.texture("asphalt_normal.png") {
+                aMat.normal.contents = norm
+            }
+        } else {
+            aMat.diffuse.contents = UIColor(red: 0.16, green: 0.17, blue: 0.20, alpha: 1.0)
+        }
         asphalt.materials = [aMat]
         let aNode = SCNNode(geometry: asphalt)
         aNode.position.y = 0.03
         holder.addChildNode(aNode)
-
-        let stripe = SCNBox(width: tile.kind == .fourLane ? 0.14 : 0.08, height: 0.01, length: w * 0.55, chamferRadius: 0)
-        let sMat = SCNMaterial()
-        sMat.diffuse.contents = tile.kind == .fourLane
-            ? UIColor(red: 0.96, green: 0.78, blue: 0.18, alpha: 1.0)
-            : UIColor.white
-        stripe.materials = [sMat]
-        let sNode = SCNNode(geometry: stripe)
-        sNode.position.y = 0.066
-        holder.addChildNode(sNode)
 
         if (abs(tile.coord.x) + abs(tile.coord.z)) % 2 == 0 {
             let pole = SCNCylinder(radius: 0.03, height: 0.85)
@@ -295,6 +378,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     private func makeZoneNode(tile: ZoneTile, connectedToRoad: Bool) -> SCNNode {
         let holder = SCNNode()
         let w = CGFloat(tileSize * 0.94)
+        let bank = NusantaraAssetBank.shared
 
         let base = SCNBox(width: w, height: 0.05, length: w, chamferRadius: 0)
         let baseMat = SCNMaterial()
@@ -331,12 +415,16 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             let bHeight = (0.75 + CGFloat(hash) * 0.35) * heightBoost
             let body = SCNBox(width: 1.15, height: bHeight, length: 1.15, chamferRadius: 0.04)
             let mat = SCNMaterial()
-            let colors: [UIColor] = [
-                UIColor(red: 0.95, green: 0.92, blue: 0.85, alpha: 1.0),
-                UIColor(red: 0.92, green: 0.45, blue: 0.38, alpha: 1.0),
-                UIColor(red: 0.35, green: 0.72, blue: 0.88, alpha: 1.0)
-            ]
-            mat.diffuse.contents = colors[hash]
+            if hash == 1, let kampungTex = bank.texture("kampung_warnawarni_albedo.png") {
+                mat.diffuse.contents = kampungTex
+            } else {
+                let colors: [UIColor] = [
+                    UIColor(red: 0.95, green: 0.92, blue: 0.85, alpha: 1.0),
+                    UIColor(red: 0.92, green: 0.45, blue: 0.38, alpha: 1.0),
+                    UIColor(red: 0.35, green: 0.72, blue: 0.88, alpha: 1.0)
+                ]
+                mat.diffuse.contents = colors[hash]
+            }
             if isNightMode {
                 mat.emission.contents = UIColor(red: 0.35, green: 0.28, blue: 0.12, alpha: 1.0)
             }
@@ -354,18 +442,32 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
             holder.addChildNode(rNode)
 
         case .commercial:
-            let bHeight = (1.5 + CGFloat(hash) * 0.9) * heightBoost
-            let tower = SCNBox(width: 1.32, height: bHeight, length: 1.32, chamferRadius: 0.05)
-            let mat = SCNMaterial()
-            mat.diffuse.contents = UIColor(red: 0.24, green: 0.46, blue: 0.74, alpha: 1.0)
-            mat.specular.contents = UIColor.white
-            if isNightMode {
-                mat.emission.contents = UIColor(red: 0.25, green: 0.48, blue: 0.75, alpha: 1.0)
+            if hash == 0 {
+                // Minimarket Nusantara (Indomaret)
+                let shop = SCNBox(width: 1.42, height: 0.85, length: 1.25, chamferRadius: 0.02)
+                let sMat = SCNMaterial()
+                sMat.diffuse.contents = bank.texture("indomaret_facade_albedo.png") ?? UIColor.systemBlue
+                if isNightMode {
+                    sMat.emission.contents = UIColor(red: 0.28, green: 0.32, blue: 0.38, alpha: 1.0)
+                }
+                shop.materials = [sMat]
+                let sNode = SCNNode(geometry: shop)
+                sNode.position.y = 0.47
+                holder.addChildNode(sNode)
+            } else {
+                let bHeight = (1.6 + CGFloat(hash) * 0.95) * heightBoost
+                let tower = SCNBox(width: 1.32, height: bHeight, length: 1.32, chamferRadius: 0.05)
+                let mat = SCNMaterial()
+                mat.diffuse.contents = bank.texture("building_facade_day.png") ?? UIColor(red: 0.24, green: 0.46, blue: 0.74, alpha: 1.0)
+                mat.specular.contents = UIColor.white
+                if isNightMode {
+                    mat.emission.contents = bank.texture("building_facade_night_emission.png") ?? UIColor(red: 0.25, green: 0.48, blue: 0.75, alpha: 1.0)
+                }
+                tower.materials = [mat]
+                let tNode = SCNNode(geometry: tower)
+                tNode.position.y = Float(bHeight * 0.5) + 0.05
+                holder.addChildNode(tNode)
             }
-            tower.materials = [mat]
-            let tNode = SCNNode(geometry: tower)
-            tNode.position.y = Float(bHeight * 0.5) + 0.05
-            holder.addChildNode(tNode)
 
         case .industrial:
             let bHeight = (1.05 + CGFloat(hash) * 0.25) * heightBoost
@@ -481,6 +583,7 @@ final class City3DEngine: NSObject, SCNSceneRendererDelegate {
     func toggleNightMode() -> Bool {
         isNightMode.toggle()
         applyAtmosphere()
+        NusantaraAssetBank.shared.playBGM(night: isNightMode, map: currentMap)
         return isNightMode
     }
 

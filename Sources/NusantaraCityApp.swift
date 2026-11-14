@@ -1,4 +1,4 @@
-﻿import UIKit
+import UIKit
 import SwiftUI
 import Combine
 
@@ -154,6 +154,7 @@ final class GameViewModel: ObservableObject {
             guard spendBudget(selectedRoadKind.costIDR) else { return }
             roads[coord] = RoadTile(coord: coord, kind: selectedRoadKind)
             engine.syncWorld(roads: roads, zones: zones)
+            NusantaraAssetBank.shared.playBuildSFX()
             recalculateStats()
 
         case .zones:
@@ -164,6 +165,7 @@ final class GameViewModel: ObservableObject {
             guard spendBudget(selectedZoneKind.costIDR) else { return }
             zones[coord] = ZoneTile(coord: coord, kind: selectedZoneKind, level: 1)
             engine.syncWorld(roads: roads, zones: zones)
+            NusantaraAssetBank.shared.playBuildSFX()
             recalculateStats()
 
         case .bulldoze:

@@ -9,15 +9,17 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      - path: Assets.xcassets
       - path: GameAssets
         type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nusantara.citybuilding3dv3
         PRODUCT_NAME: CityBuildingNusantara
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "City Building Nusantara"
         INFOPLIST_KEY_UIRequiresFullScreen: YES
@@ -26,5 +28,5 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         CODE_SIGN_IDENTITY: ""
-        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO

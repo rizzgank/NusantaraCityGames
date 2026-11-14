@@ -1,4 +1,4 @@
-﻿name: Build City Building Nusantara IPA
+﻿name: Build City Building Nusantara IPA (100MB+ HD Edition)
 
 on:
   push:
@@ -16,14 +16,22 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Setup Python & Asset Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Prepare GameAssets Bundle
+      - name: Install XcodeGen & Image/Audio Libraries
+        run: |
+          brew install xcodegen
+          python3 -m pip install --upgrade pip
+          pip install pillow numpy
+
+      - name: Generate AppIcon & 110MB+ HD GameAssets
         run: |
           rm -rf Resources GameAssets Assets.xcassets
-          mkdir -p GameAssets
-          echo '{"studio":"Rizzi Games","project":"City Building Nusantara","version":"1.0"}' > GameAssets/manifest.json
+          python3 Scripts/generate_assets.py
+          du -sh GameAssets Assets.xcassets
 
       - name: Generate Xcode Project
         run: xcodegen generate
@@ -57,6 +65,6 @@ jobs:
       - name: Publish IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "City Building : Nusantara Project v1.0.${{ github.run_number }}"
+          tag_name: v2.0.${{ github.run_number }}
+          name: "City Building : Nusantara Project v2.0.${{ github.run_number }} (HD 100MB+)"
           files: CityBuildingNusantara.ipa
