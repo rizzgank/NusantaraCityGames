@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Rizzi Games (RG) - City Building : Nusantara Project
-Automated AppIcon, 3D Model (.obj), HD PBR Texture (.png), Topographic Heightmap,
-and Stereo Audio Generator for GitHub Actions iOS Build (100MB+ Target).
+Fast-Download Build (~12MB) Generator for AppIcon, 3D Models, PBR Textures,
+Topographic Maps, and Stereo Audio.
 """
 
 import os
@@ -27,10 +27,6 @@ def ensure_dirs():
     for d in [BASE_DIR, MODELS_DIR, TEXTURES_DIR, MAPS_DIR, AUDIO_DIR, XCASSETS_DIR, APPICON_DIR]:
         os.makedirs(d, exist_ok=True)
 
-
-# ==============================================================================
-# 0. iOS HOME SCREEN APP ICON GENERATOR
-# ==============================================================================
 
 def generate_app_icon():
     print("[0/4] Generating iOS AppIcon.appiconset...")
@@ -66,30 +62,32 @@ def generate_app_icon():
     draw.rectangle([0, 860, 1024, 1024], fill=(32, 38, 46))
     draw.rectangle([0, 928, 1024, 944], fill=(245, 195, 45))
 
-    for px_size, fname in [(120, "icon_120.png"), (180, "icon_180.png"), (1024, "icon_1024.png")]:
+    icon_specs = [
+        (40, "icon_40.png", "20x20", "2x"),
+        (60, "icon_60.png", "20x20", "3x"),
+        (58, "icon_58.png", "29x29", "2x"),
+        (87, "icon_87.png", "29x29", "3x"),
+        (80, "icon_80.png", "40x40", "2x"),
+        (120, "icon_120_40.png", "40x40", "3x"),
+        (120, "icon_120.png", "60x60", "2x"),
+        (180, "icon_180.png", "60x60", "3x"),
+        (1024, "icon_1024.png", "1024x1024", "1x"),
+    ]
+    images_json = []
+    for px_size, fname, pt_size, scale in icon_specs:
         resized = img.resize((px_size, px_size), Image.Resampling.LANCZOS)
         resized.save(os.path.join(APPICON_DIR, fname), format="PNG")
+        idiom = "ios-marketing" if pt_size == "1024x1024" else "iphone"
+        images_json.append({"filename": fname, "idiom": idiom, "scale": scale, "size": pt_size})
 
     with open(os.path.join(XCASSETS_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
         json.dump({"info": {"author": "xcode", "version": 1}}, fp, indent=2)
 
-    appicon_contents = {
-        "images": [
-            {"filename": "icon_120.png", "idiom": "iphone", "scale": "2x", "size": "60x60"},
-            {"filename": "icon_180.png", "idiom": "iphone", "scale": "3x", "size": "60x60"},
-            {"filename": "icon_1024.png", "idiom": "ios-marketing", "scale": "1x", "size": "1024x1024"},
-        ],
-        "info": {"author": "xcode", "version": 1},
-    }
     with open(os.path.join(APPICON_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
-        json.dump(appicon_contents, fp, indent=2)
+        json.dump({"images": images_json, "info": {"author": "xcode", "version": 1}}, fp, indent=2)
 
 
-# ==============================================================================
-# 1. HD PBR TEXTURE GENERATOR (1408x1408 -> ~110MB Total IPA)
-# ==============================================================================
-
-def fbm_noise(size: int, octaves=(8, 32, 128, 352), weights=(0.45, 0.30, 0.15, 0.10)) -> np.ndarray:
+def fbm_noise(size: int, octaves=(8, 32, 128), weights=(0.50, 0.30, 0.20)) -> np.ndarray:
     acc = np.zeros((size, size), dtype=np.float32)
     for grid, w in zip(octaves, weights):
         base = RNG.random((grid, grid), dtype=np.float32)
@@ -99,126 +97,123 @@ def fbm_noise(size: int, octaves=(8, 32, 128, 352), weights=(0.45, 0.30, 0.15, 0
     return np.clip(acc, 0.0, 1.0)
 
 
-def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 8):
+def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 6):
     h, w, _ = arr_float.shape
     grain = RNG.integers(-micro_grain, micro_grain + 1, size=(h, w, 3), dtype=np.int16)
     out = np.clip(arr_float.astype(np.int16) + grain, 0, 255).astype(np.uint8)
-    Image.fromarray(out, mode="RGB").save(path, format="PNG", compress_level=6)
+    Image.fromarray(out, mode="RGB").save(path, format="PNG", compress_level=7)
 
 
 def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) -> np.ndarray:
     dy, dx = np.gradient(height_2d * strength)
-    nx = -dx
-    ny = -dy
-    nz = np.ones_like(height_2d)
+    nx, ny, nz = -dx, -dy, np.ones_like(height_2d)
     norm = np.sqrt(nx * nx + ny * ny + nz * nz) + 1e-6
-    rgb = np.stack([(nx / norm * 0.5 + 0.5) * 255.0,
-                    (ny / norm * 0.5 + 0.5) * 255.0,
-                    (nz / norm * 0.5 + 0.5) * 255.0], axis=-1)
-    return rgb
+    return np.stack([
+        (nx / norm * 0.5 + 0.5) * 255.0,
+        (ny / norm * 0.5 + 0.5) * 255.0,
+        (nz / norm * 0.5 + 0.5) * 255.0,
+    ], axis=-1)
 
 
 def generate_all_textures():
-    print("[1/4] Generating HD (1408x1408) PBR Textures...")
-    S = 1408
+    print("[1/4] Generating PBR Textures (512x512 Fast-Test)...")
+    S = 512
     n_base = fbm_noise(S)
-    n_fine = fbm_noise(S, octaves=(22, 88, 352, 704), weights=(0.2, 0.3, 0.3, 0.2))
+    n_fine = fbm_noise(S, octaves=(16, 64, 256), weights=(0.3, 0.4, 0.3))
 
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
     asphalt[..., 0] = 36 + n_base * 22 + n_fine * 14
     asphalt[..., 1] = 38 + n_base * 22 + n_fine * 14
     asphalt[..., 2] = 43 + n_base * 24 + n_fine * 15
-    save_rgb_png(asphalt, os.path.join(TEXTURES_DIR, "asphalt_albedo.png"), micro_grain=10)
-    save_rgb_png(generate_normal_from_height(n_fine, 4.0), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=6)
+    save_rgb_png(asphalt, os.path.join(TEXTURES_DIR, "asphalt_albedo.png"))
+    save_rgb_png(generate_normal_from_height(n_fine, 4.0), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=4)
 
     rough = np.repeat(((0.35 + n_base * 0.45) * 255.0)[..., None], 3, axis=-1)
-    save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"), micro_grain=8)
+    save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"))
 
     road_1w2l = asphalt.copy()
-    road_1w2l[:, 28:52] = [235, 235, 230]
-    road_1w2l[:, S - 52:S - 28] = [235, 235, 230]
-    for y in range(0, S, 176):
-        road_1w2l[y:y + 88, S // 2 - 11:S // 2 + 11] = [245, 245, 240]
-    save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"), micro_grain=8)
+    road_1w2l[:, 10:19] = [235, 235, 230]
+    road_1w2l[:, S - 19:S - 10] = [235, 235, 230]
+    for y in range(0, S, 64):
+        road_1w2l[y:y + 32, S // 2 - 4:S // 2 + 4] = [245, 245, 240]
+    save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"))
 
     road_2w4l = asphalt.copy()
-    road_2w4l[:, 26:48] = [235, 235, 230]
-    road_2w4l[:, S - 48:S - 26] = [235, 235, 230]
-    road_2w4l[:, S // 2 - 18:S // 2 - 5] = [240, 185, 30]
-    road_2w4l[:, S // 2 + 5:S // 2 + 18] = [240, 185, 30]
-    for y in range(0, S, 176):
-        road_2w4l[y:y + 88, S // 4 - 8:S // 4 + 8] = [240, 240, 235]
-        road_2w4l[y:y + 88, (3 * S) // 4 - 8:(3 * S) // 4 + 8] = [240, 240, 235]
-    save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"), micro_grain=8)
+    road_2w4l[:, 9:17] = [235, 235, 230]
+    road_2w4l[:, S - 17:S - 9] = [235, 235, 230]
+    road_2w4l[:, S // 2 - 7:S // 2 - 2] = [240, 185, 30]
+    road_2w4l[:, S // 2 + 2:S // 2 + 7] = [240, 185, 30]
+    for y in range(0, S, 64):
+        road_2w4l[y:y + 32, S // 4 - 3:S // 4 + 3] = [240, 240, 235]
+        road_2w4l[y:y + 32, (3 * S) // 4 - 3:(3 * S) // 4 + 3] = [240, 240, 235]
+    save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"))
 
     yy, xx = np.mgrid[0:S, 0:S]
-    tile_x = (xx // 44) % 2
-    tile_y = (yy // 44) % 2
-    checker = (tile_x ^ tile_y).astype(np.float32)
-    grout = ((xx % 44 < 3) | (yy % 44 < 3)).astype(np.float32)
+    checker = (((xx // 16) % 2) ^ ((yy // 16) % 2)).astype(np.float32)
+    grout = ((xx % 16 < 2) | (yy % 16 < 2)).astype(np.float32)
     paving = np.zeros((S, S, 3), dtype=np.float32)
     paving[..., 0] = np.where(checker > 0, 168, 128) + n_fine * 24 - grout * 55
     paving[..., 1] = np.where(checker > 0, 82, 126) + n_fine * 20 - grout * 55
     paving[..., 2] = np.where(checker > 0, 74, 124) + n_fine * 20 - grout * 55
-    save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"), micro_grain=9)
+    save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"))
     save_rgb_png(generate_normal_from_height(1.0 - grout * 0.6 + n_fine * 0.3, 4.5),
-                 os.path.join(TEXTURES_DIR, "sidewalk_normal.png"), micro_grain=6)
+                 os.path.join(TEXTURES_DIR, "sidewalk_normal.png"), micro_grain=4)
 
     bikelane = np.zeros((S, S, 3), dtype=np.float32)
     bikelane[..., 0] = 34 + n_fine * 20
     bikelane[..., 1] = 138 + n_fine * 28
     bikelane[..., 2] = 74 + n_fine * 20
-    bikelane[:, 16:36] = [245, 245, 245]
-    bikelane[:, S - 36:S - 16] = [245, 245, 245]
-    save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"), micro_grain=8)
+    bikelane[:, 6:14] = [245, 245, 245]
+    bikelane[:, S - 14:S - 6] = [245, 245, 245]
+    save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"))
 
     grass = np.zeros((S, S, 3), dtype=np.float32)
     grass[..., 0] = 44 + n_base * 34 + n_fine * 18
     grass[..., 1] = 108 + n_base * 48 + n_fine * 26
     grass[..., 2] = 36 + n_base * 22 + n_fine * 14
-    save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"), micro_grain=10)
-    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=6)
+    save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"))
+    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=4)
 
     soil = np.zeros((S, S, 3), dtype=np.float32)
     soil[..., 0] = 104 + n_base * 36 + n_fine * 20
     soil[..., 1] = 74 + n_base * 28 + n_fine * 16
     soil[..., 2] = 52 + n_base * 20 + n_fine * 12
-    save_rgb_png(soil, os.path.join(TEXTURES_DIR, "soil_mountain_albedo.png"), micro_grain=10)
-    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "soil_normal.png"), micro_grain=6)
+    save_rgb_png(soil, os.path.join(TEXTURES_DIR, "soil_mountain_albedo.png"))
+    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "soil_normal.png"), micro_grain=4)
 
     pinus = np.stack([24 + n_fine * 25, 76 + n_base * 40 + n_fine * 24, 34 + n_fine * 20], axis=-1)
-    save_rgb_png(pinus, os.path.join(TEXTURES_DIR, "foliage_pinus_albedo.png"), micro_grain=10)
+    save_rgb_png(pinus, os.path.join(TEXTURES_DIR, "foliage_pinus_albedo.png"))
 
     trembesi = np.stack([42 + n_fine * 30, 118 + n_base * 45 + n_fine * 25, 44 + n_fine * 22], axis=-1)
-    save_rgb_png(trembesi, os.path.join(TEXTURES_DIR, "foliage_trembesi_albedo.png"), micro_grain=10)
+    save_rgb_png(trembesi, os.path.join(TEXTURES_DIR, "foliage_trembesi_albedo.png"))
 
     blossom_mask = (n_fine > 0.56).astype(np.float32)
     tabebuya = np.zeros((S, S, 3), dtype=np.float32)
     tabebuya[..., 0] = np.where(blossom_mask > 0, 242, 48) + n_fine * 18
     tabebuya[..., 1] = np.where(blossom_mask > 0, 156, 114) + n_fine * 18
     tabebuya[..., 2] = np.where(blossom_mask > 0, 196, 48) + n_fine * 18
-    save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"), micro_grain=10)
+    save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"))
 
-    win_x = (xx % 88 >= 16) & (xx % 88 <= 72)
-    win_y = (yy % 88 >= 18) & (yy % 88 <= 70)
+    win_x = (xx % 32 >= 6) & (xx % 32 <= 26)
+    win_y = (yy % 32 >= 7) & (yy % 32 <= 25)
     is_window = win_x & win_y
-    cell_id = (xx // 88) * 31 + (yy // 88) * 17
+    cell_id = (xx // 32) * 31 + (yy // 32) * 17
     lit_mask = is_window & ((cell_id % 5) != 0)
 
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
     facade_day[..., 0] = np.where(is_window, 55, 198 + n_base * 24)
     facade_day[..., 1] = np.where(is_window, 78, 194 + n_base * 24)
     facade_day[..., 2] = np.where(is_window, 105, 186 + n_base * 24)
-    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"), micro_grain=7)
+    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"))
 
     facade_night = np.zeros((S, S, 3), dtype=np.float32)
     warm_tone = (cell_id % 3)
     facade_night[..., 0] = np.where(lit_mask, 255, 8)
     facade_night[..., 1] = np.where(lit_mask, np.where(warm_tone == 0, 214, 185), 10)
     facade_night[..., 2] = np.where(lit_mask, np.where(warm_tone == 0, 128, 92), 18)
-    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=6)
+    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"))
 
-    stripe = (xx // 176) % 5
+    stripe = (xx // 64) % 5
     palette = np.array([
         [235, 68, 74],
         [248, 196, 42],
@@ -228,19 +223,15 @@ def generate_all_textures():
     ], dtype=np.float32)
     kampung = palette[stripe] + (n_fine[..., None] - 0.5) * 28.0
     kampung[is_window] = [42, 48, 58]
-    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=8)
+    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"))
 
     indo = np.full((S, S, 3), [242, 244, 248], dtype=np.float32)
-    indo[0:150, :] = [218, 37, 29]
-    indo[150:235, :] = [0, 91, 170]
-    indo[235:285, :] = [255, 204, 0]
-    indo[480:1270, 125:1280] = [48, 76, 108]
-    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=7)
+    indo[0:55, :] = [218, 37, 29]
+    indo[55:85, :] = [0, 91, 170]
+    indo[85:105, :] = [255, 204, 0]
+    indo[175:460, 45:465] = [48, 76, 108]
+    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"))
 
-
-# ==============================================================================
-# 2. HIGH-DETAIL 3D MESH GENERATOR (.OBJ)
-# ==============================================================================
 
 class ObjBuilder:
     def __init__(self):
@@ -256,28 +247,21 @@ class ObjBuilder:
     def add_box(self, cx: float, cy: float, cz: float, sx: float, sy: float, sz: float):
         hx, hy, hz = sx * 0.5, sy * 0.5, sz * 0.5
         corners = [
-            (cx - hx, cy - hy, cz - hz),
-            (cx + hx, cy - hy, cz - hz),
-            (cx + hx, cy + hy, cz - hz),
-            (cx - hx, cy + hy, cz - hz),
-            (cx - hx, cy - hy, cz + hz),
-            (cx + hx, cy - hy, cz + hz),
-            (cx + hx, cy + hy, cz + hz),
-            (cx - hx, cy + hy, cz + hz),
+            (cx - hx, cy - hy, cz - hz), (cx + hx, cy - hy, cz - hz),
+            (cx + hx, cy + hy, cz - hz), (cx - hx, cy + hy, cz - hz),
+            (cx - hx, cy - hy, cz + hz), (cx + hx, cy - hy, cz + hz),
+            (cx + hx, cy + hy, cz + hz), (cx - hx, cy + hy, cz + hz),
         ]
         faces = [
-            ((0, 1, 2, 3), (0, 0, -1)),
-            ((5, 4, 7, 6), (0, 0, 1)),
-            ((4, 0, 3, 7), (-1, 0, 0)),
-            ((1, 5, 6, 2), (1, 0, 0)),
-            ((3, 2, 6, 7), (0, 1, 0)),
-            ((4, 5, 1, 0), (0, -1, 0)),
+            ((0, 1, 2, 3), (0, 0, -1)), ((5, 4, 7, 6), (0, 0, 1)),
+            ((4, 0, 3, 7), (-1, 0, 0)), ((1, 5, 6, 2), (1, 0, 0)),
+            ((3, 2, 6, 7), (0, 1, 0)), ((4, 5, 1, 0), (0, -1, 0)),
         ]
         uv_quad = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
         for idxs, norm in faces:
             self._emit_quad([corners[i] for i in idxs], uv_quad, norm)
 
-    def add_cylinder(self, cx: float, y0: float, cz: float, r_bottom: float, r_top: float, height: float, segs: int = 16):
+    def add_cylinder(self, cx: float, y0: float, cz: float, r_bottom: float, r_top: float, height: float, segs: int = 14):
         y1 = y0 + height
         for i in range(segs):
             a0 = (2.0 * math.pi * i) / segs
@@ -292,17 +276,13 @@ class ObjBuilder:
             uvs = [(i / segs, 0.0), ((i + 1) / segs, 0.0), ((i + 1) / segs, 1.0), (i / segs, 1.0)]
             self._emit_quad([p0, p1, p2, p3], uvs, (nx, 0.15, nz))
 
-    def add_icosphere(self, cx: float, cy: float, cz: float, rx: float, ry: float, rz: float, rings: int = 8, sectors: int = 14):
+    def add_icosphere(self, cx: float, cy: float, cz: float, rx: float, ry: float, rz: float, rings: int = 6, sectors: int = 12):
         for r in range(rings):
-            v0 = r / rings
-            v1 = (r + 1) / rings
-            phi0 = (v0 - 0.5) * math.pi
-            phi1 = (v1 - 0.5) * math.pi
+            v0, v1 = r / rings, (r + 1) / rings
+            phi0, phi1 = (v0 - 0.5) * math.pi, (v1 - 0.5) * math.pi
             for s in range(sectors):
-                u0 = s / sectors
-                u1 = (s + 1) / sectors
-                th0 = u0 * 2.0 * math.pi
-                th1 = u1 * 2.0 * math.pi
+                u0, u1 = s / sectors, (s + 1) / sectors
+                th0, th1 = u0 * 2.0 * math.pi, u1 * 2.0 * math.pi
 
                 def pt(phi, th):
                     x = math.cos(phi) * math.cos(th)
@@ -330,7 +310,7 @@ class ObjBuilder:
         self.groups.append((self.current_group, f2))
 
     def write(self, path: str):
-        lines = ["# Rizzi Games Procedural High-Detail 3D Asset\n"]
+        lines = ["# Rizzi Games 3D Asset\n"]
         for x, y, z in self.vertices:
             lines.append(f"v {x:.4f} {y:.4f} {z:.4f}\n")
         for u, v in self.uvs:
@@ -348,48 +328,47 @@ class ObjBuilder:
 
 
 def generate_all_models():
-    print("[2/4] Generating High-Detail 3D Models (.obj)...")
+    print("[2/4] Generating 3D Models (.obj)...")
 
     pinus = ObjBuilder()
     pinus.set_group("trunk")
-    pinus.add_cylinder(0, 0, 0, 0.28, 0.08, 6.2, segs=18)
+    pinus.add_cylinder(0, 0, 0, 0.28, 0.08, 6.2)
     for tier in range(6):
         y = 1.6 + tier * 0.78
         rad = 1.95 - tier * 0.26
         pinus.set_group("branches")
         for b in range(5):
             ang = b * (2 * math.pi / 5) + tier * 0.5
-            bx, bz = math.cos(ang) * (rad * 0.45), math.sin(ang) * (rad * 0.45)
-            pinus.add_box(bx, y, bz, rad * 0.7, 0.08, 0.08)
+            pinus.add_box(math.cos(ang) * (rad * 0.45), y, math.sin(ang) * (rad * 0.45), rad * 0.7, 0.08, 0.08)
         pinus.set_group("leaves")
-        pinus.add_cylinder(0, y - 0.1, 0, rad, rad * 0.15, 1.15, segs=20)
+        pinus.add_cylinder(0, y - 0.1, 0, rad, rad * 0.15, 1.15)
     pinus.write(os.path.join(MODELS_DIR, "tree_pinus_malang.obj"))
 
     trembesi = ObjBuilder()
     trembesi.set_group("trunk")
-    trembesi.add_cylinder(0, 0, 0, 0.42, 0.24, 3.2, segs=18)
+    trembesi.add_cylinder(0, 0, 0, 0.42, 0.24, 3.2)
     trembesi.set_group("branches")
     for b in range(6):
         ang = b * (math.pi / 3.0)
         trembesi.add_box(math.cos(ang) * 0.9, 3.1, math.sin(ang) * 0.9, 1.8, 0.14, 0.14)
     trembesi.set_group("leaves")
-    trembesi.add_icosphere(0, 4.1, 0, 3.2, 1.35, 3.2, rings=10, sectors=18)
+    trembesi.add_icosphere(0, 4.1, 0, 3.2, 1.35, 3.2)
     for b in range(6):
         ang = b * (math.pi / 3.0)
-        trembesi.add_icosphere(math.cos(ang) * 1.9, 3.85, math.sin(ang) * 1.9, 1.5, 0.85, 1.5, rings=8, sectors=14)
+        trembesi.add_icosphere(math.cos(ang) * 1.9, 3.85, math.sin(ang) * 1.9, 1.5, 0.85, 1.5)
     trembesi.write(os.path.join(MODELS_DIR, "tree_trembesi_surabaya.obj"))
 
     tabebuya = ObjBuilder()
     tabebuya.set_group("trunk")
-    tabebuya.add_cylinder(0, 0, 0, 0.22, 0.12, 2.8, segs=16)
+    tabebuya.add_cylinder(0, 0, 0, 0.22, 0.12, 2.8)
     tabebuya.set_group("leaves")
-    tabebuya.add_icosphere(0, 3.5, 0, 2.1, 1.4, 2.1, rings=10, sectors=16)
+    tabebuya.add_icosphere(0, 3.5, 0, 2.1, 1.4, 2.1)
     tabebuya.write(os.path.join(MODELS_DIR, "tree_tabebuya_surabaya.obj"))
 
     motor = ObjBuilder()
     motor.set_group("wheels")
-    motor.add_cylinder(0, 0.28, 0.62, 0.28, 0.28, 0.12, segs=16)
-    motor.add_cylinder(0, 0.28, -0.62, 0.28, 0.28, 0.12, segs=16)
+    motor.add_cylinder(0, 0.28, 0.62, 0.28, 0.28, 0.12)
+    motor.add_cylinder(0, 0.28, -0.62, 0.28, 0.28, 0.12)
     motor.set_group("body")
     motor.add_box(0, 0.56, 0.0, 0.34, 0.36, 1.35)
     motor.add_box(0, 0.95, 0.42, 0.64, 0.12, 0.16)
@@ -397,7 +376,7 @@ def generate_all_models():
     motor.add_box(0, 0.88, 0.54, 0.16, 0.14, 0.08)
     motor.set_group("rider")
     motor.add_box(0, 1.08, -0.05, 0.36, 0.52, 0.26)
-    motor.add_icosphere(0, 1.48, 0.02, 0.16, 0.18, 0.18, rings=8, sectors=12)
+    motor.add_icosphere(0, 1.48, 0.02, 0.16, 0.18, 0.18)
     motor.write(os.path.join(MODELS_DIR, "vehicle_motor.obj"))
 
     car = ObjBuilder()
@@ -408,7 +387,7 @@ def generate_all_models():
     car.set_group("wheels")
     for wx in (-0.84, 0.84):
         for wz in (-1.28, 1.28):
-            car.add_cylinder(wx, 0.32, wz, 0.32, 0.32, 0.22, segs=16)
+            car.add_cylinder(wx, 0.32, wz, 0.32, 0.32, 0.22)
     car.set_group("headlight")
     car.add_box(-0.62, 0.56, 2.08, 0.32, 0.16, 0.06)
     car.add_box(0.62, 0.56, 2.08, 0.32, 0.16, 0.06)
@@ -416,14 +395,14 @@ def generate_all_models():
 
     bike = ObjBuilder()
     bike.set_group("wheels")
-    bike.add_cylinder(0, 0.34, 0.58, 0.34, 0.34, 0.06, segs=16)
-    bike.add_cylinder(0, 0.34, -0.58, 0.34, 0.34, 0.06, segs=16)
+    bike.add_cylinder(0, 0.34, 0.58, 0.34, 0.34, 0.06)
+    bike.add_cylinder(0, 0.34, -0.58, 0.34, 0.34, 0.06)
     bike.set_group("body")
     bike.add_box(0, 0.64, 0.0, 0.10, 0.38, 1.12)
     bike.add_box(0, 0.96, 0.44, 0.54, 0.08, 0.10)
     bike.set_group("rider")
     bike.add_box(0, 1.14, -0.04, 0.34, 0.50, 0.24)
-    bike.add_icosphere(0, 1.52, 0.04, 0.15, 0.17, 0.17, rings=8, sectors=12)
+    bike.add_icosphere(0, 1.52, 0.04, 0.15, 0.17, 0.17)
     bike.write(os.path.join(MODELS_DIR, "vehicle_sepeda.obj"))
 
     ped = ObjBuilder()
@@ -436,7 +415,7 @@ def generate_all_models():
     ped.add_box(-0.26, 1.10, 0, 0.12, 0.52, 0.14)
     ped.add_box(0.26, 1.10, 0, 0.12, 0.52, 0.14)
     ped.set_group("head")
-    ped.add_icosphere(0, 1.56, 0, 0.14, 0.16, 0.15, rings=8, sectors=12)
+    ped.add_icosphere(0, 1.56, 0, 0.14, 0.16, 0.15)
     ped.write(os.path.join(MODELS_DIR, "npc_pedestrian.obj"))
 
     for fname in ["building_house.obj", "building_kampung_warnawarni.obj"]:
@@ -474,7 +453,7 @@ def generate_all_models():
         edu.set_group("roof")
         edu.add_box(0, h + 0.4, 0, w + 0.6, 0.8, d + 0.6)
         if has_dome:
-            edu.add_icosphere(0, h + 1.8, 0, 2.6, 2.0, 2.6, rings=10, sectors=16)
+            edu.add_icosphere(0, h + 1.8, 0, 2.6, 2.0, 2.6)
         edu.write(os.path.join(MODELS_DIR, fname))
 
     basecamp = ObjBuilder()
@@ -490,22 +469,18 @@ def generate_all_models():
 
     lamp = ObjBuilder()
     lamp.set_group("pole")
-    lamp.add_cylinder(0, 0, 0, 0.12, 0.07, 4.6, segs=12)
+    lamp.add_cylinder(0, 0, 0, 0.12, 0.07, 4.6)
     lamp.add_box(0.45, 4.55, 0, 0.95, 0.08, 0.08)
     lamp.set_group("bulb")
     lamp.add_box(0.85, 4.46, 0, 0.28, 0.10, 0.18)
     lamp.write(os.path.join(MODELS_DIR, "prop_streetlight.obj"))
 
 
-# ==============================================================================
-# 3. NUSANTARA REALISTIC TOPOGRAPHIC MAPS (MALANG, SURABAYA, JAKARTA)
-# ==============================================================================
-
 def generate_nusantara_maps():
-    print("[3/4] Generating Nusantara Topographic Heightmaps (Malang, Surabaya, Jakarta)...")
-    M = 1024
+    print("[3/4] Generating Nusantara Topographic Heightmaps...")
+    M = 512
     yy, xx = np.mgrid[0:M, 0:M].astype(np.float32) / M
-    terrain_noise = fbm_noise(M, octaves=(4, 16, 64, 256), weights=(0.5, 0.25, 0.15, 0.10))
+    terrain_noise = fbm_noise(M, octaves=(4, 16, 64), weights=(0.55, 0.30, 0.15))
 
     arjuno = np.exp(-(((xx - 0.52) ** 2) / 0.025 + ((yy - 0.14) ** 2) / 0.020)) * 0.72
     kawi = np.exp(-(((xx - 0.12) ** 2) / 0.022 + ((yy - 0.48) ** 2) / 0.030)) * 0.55
@@ -559,11 +534,7 @@ def generate_nusantara_maps():
             json.dump(meta, fp, indent=2)
 
 
-# ==============================================================================
-# 4. STEREO AMBIENT & COZY NIGHT CITY AUDIO GENERATOR (.WAV)
-# ==============================================================================
-
-def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 32000):
+def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 22050):
     stereo = np.stack([np.clip(left, -1.0, 1.0), np.clip(right, -1.0, 1.0)], axis=-1)
     pcm = (stereo * 32767.0).astype(np.int16)
     with wave.open(path, "wb") as wf:
@@ -575,9 +546,9 @@ def write_stereo_wav(path: str, left: np.ndarray, right: np.ndarray, sr: int = 3
 
 def generate_all_audio():
     print("[4/4] Generating Stereo City & Cozy Night Audio (.wav)...")
-    sr = 32000
+    sr = 22050
 
-    t = np.linspace(0, 32.0, sr * 32, endpoint=False, dtype=np.float32)
+    t = np.linspace(0, 16.0, sr * 16, endpoint=False, dtype=np.float32)
     chords = [
         (220.00, 261.63, 329.63, 392.00),
         (174.61, 220.00, 261.63, 329.63),
@@ -587,32 +558,30 @@ def generate_all_audio():
     pad_l = np.zeros_like(t)
     pad_r = np.zeros_like(t)
     for idx, freqs in enumerate(chords):
-        mask = ((t >= idx * 8.0) & (t < (idx + 1) * 8.0)).astype(np.float32)
+        mask = ((t >= idx * 4.0) & (t < (idx + 1) * 4.0)).astype(np.float32)
         for f in freqs:
             pad_l += mask * 0.08 * np.sin(2 * np.pi * f * t)
             pad_r += mask * 0.08 * np.sin(2 * np.pi * (f * 1.003) * t + 0.4)
     breeze = RNG.normal(0.0, 0.015, size=t.shape).astype(np.float32)
     write_stereo_wav(os.path.join(AUDIO_DIR, "cozy_night_city.wav"), pad_l + breeze, pad_r + breeze, sr)
 
-    t2 = np.linspace(0, 26.0, sr * 26, endpoint=False, dtype=np.float32)
+    t2 = np.linspace(0, 12.0, sr * 12, endpoint=False, dtype=np.float32)
     hum = 0.07 * np.sin(2 * np.pi * 68.0 * t2) + 0.04 * np.sin(2 * np.pi * 136.0 * t2)
-    street_noise_l = RNG.normal(0.0, 0.045, size=t2.shape).astype(np.float32) + hum
-    street_noise_r = RNG.normal(0.0, 0.045, size=t2.shape).astype(np.float32) + hum
-    write_stereo_wav(os.path.join(AUDIO_DIR, "city_traffic_day.wav"), street_noise_l, street_noise_r, sr)
+    street_noise = RNG.normal(0.0, 0.045, size=t2.shape).astype(np.float32) + hum
+    write_stereo_wav(os.path.join(AUDIO_DIR, "city_traffic_day.wav"), street_noise, street_noise, sr)
 
-    t3 = np.linspace(0, 24.0, sr * 24, endpoint=False, dtype=np.float32)
+    t3 = np.linspace(0, 12.0, sr * 12, endpoint=False, dtype=np.float32)
     swell = 0.5 + 0.4 * np.sin(2 * np.pi * 0.12 * t3)
     wind_l = RNG.normal(0.0, 0.055, size=t3.shape).astype(np.float32) * swell
     wind_r = RNG.normal(0.0, 0.055, size=t3.shape).astype(np.float32) * (1.0 - swell * 0.4)
     write_stereo_wav(os.path.join(AUDIO_DIR, "wind_leaves_mountain.wav"), wind_l, wind_r, sr)
 
-    t4 = np.linspace(0, 16.0, sr * 16, endpoint=False, dtype=np.float32)
+    t4 = np.linspace(0, 8.0, sr * 8, endpoint=False, dtype=np.float32)
     chant = 0.09 * np.sin(2 * np.pi * 190.0 * t4) * (np.sin(2 * np.pi * 1.5 * t4) > 0).astype(np.float32)
-    crowd_l = RNG.normal(0.0, 0.06, size=t4.shape).astype(np.float32) + chant
-    crowd_r = RNG.normal(0.0, 0.06, size=t4.shape).astype(np.float32) + chant
-    write_stereo_wav(os.path.join(AUDIO_DIR, "citizen_demo_crowd.wav"), crowd_l, crowd_r, sr)
+    crowd = RNG.normal(0.0, 0.06, size=t4.shape).astype(np.float32) + chant
+    write_stereo_wav(os.path.join(AUDIO_DIR, "citizen_demo_crowd.wav"), crowd, crowd, sr)
 
-    t5 = np.linspace(0, 4.0, sr * 4, endpoint=False, dtype=np.float32)
+    t5 = np.linspace(0, 2.0, sr * 2, endpoint=False, dtype=np.float32)
     env = np.exp(-t5 * 1.8)
     chime = env * (0.22 * np.sin(2 * np.pi * 523.25 * t5) + 0.18 * np.sin(2 * np.pi * 659.25 * t5))
     write_stereo_wav(os.path.join(AUDIO_DIR, "build_construct_sfx.wav"), chime, chime, sr)
