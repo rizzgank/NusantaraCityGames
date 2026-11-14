@@ -25,13 +25,16 @@ targets:
     deploymentTarget: "15.0"
     sources:
       - path: Sources
+      - path: Assets.xcassets
       - path: Resources
         type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rizzigames.citybuildingnusantara
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: "City Building : Nusantara Project"
+        INFOPLIST_KEY_CFBundleDisplayName: "City Building Nusantara"
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.simulation-games"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
