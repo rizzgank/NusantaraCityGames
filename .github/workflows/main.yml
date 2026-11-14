@@ -39,28 +39,27 @@ jobs:
         run: |
           xcodegen generate
 
-      - name: Archive Release App for iPhone
+      - name: Build Release App for iPhone
         run: |
           xcodebuild \
             -project CityBuildingNusantara.xcodeproj \
             -scheme CityBuildingNusantara \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath build/CityBuildingNusantara.xcarchive \
+            -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            archive
+            build
 
       - name: Clean, Sign & Package CityBuildingNusantara.ipa
         run: |
           rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
-          ditto --noextattr --noqtn build/CityBuildingNusantara.xcarchive/Products/Applications/CityBuildingNusantara.app Payload/CityBuildingNusantara.app
+          cp -R build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
           printf "APPL????" > Payload/CityBuildingNusantara.app/PkgInfo
-          plutil -replace DTPlatformVersion -string "16.0" Payload/CityBuildingNusantara.app/Info.plist || true
-          plutil -replace DTSDKName -string "iphoneos16.0" Payload/CityBuildingNusantara.app/Info.plist || true
-          /usr/bin/codesign --force --sign - --timestamp=none Payload/CityBuildingNusantara.app
+          xattr -cr Payload/CityBuildingNusantara.app
+          /usr/bin/codesign --force --deep --sign - --timestamp=none Payload/CityBuildingNusantara.app
           /usr/bin/codesign --verify --deep --strict --verbose=2 Payload/CityBuildingNusantara.app
           zip -r -X CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
