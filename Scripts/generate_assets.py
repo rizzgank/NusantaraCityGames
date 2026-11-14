@@ -86,10 +86,10 @@ def generate_app_icon():
 
 
 # ==============================================================================
-# 1. HD PBR TEXTURE GENERATOR (1536x1536 -> ~115MB Total IPA)
+# 1. HD PBR TEXTURE GENERATOR (1408x1408 -> ~110MB Total IPA)
 # ==============================================================================
 
-def fbm_noise(size: int, octaves=(8, 32, 128, 384), weights=(0.45, 0.30, 0.15, 0.10)) -> np.ndarray:
+def fbm_noise(size: int, octaves=(8, 32, 128, 352), weights=(0.45, 0.30, 0.15, 0.10)) -> np.ndarray:
     acc = np.zeros((size, size), dtype=np.float32)
     for grid, w in zip(octaves, weights):
         base = RNG.random((grid, grid), dtype=np.float32)
@@ -99,7 +99,7 @@ def fbm_noise(size: int, octaves=(8, 32, 128, 384), weights=(0.45, 0.30, 0.15, 0
     return np.clip(acc, 0.0, 1.0)
 
 
-def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 16):
+def save_rgb_png(arr_float: np.ndarray, path: str, micro_grain: int = 8):
     h, w, _ = arr_float.shape
     grain = RNG.integers(-micro_grain, micro_grain + 1, size=(h, w, 3), dtype=np.int16)
     out = np.clip(arr_float.astype(np.int16) + grain, 0, 255).astype(np.uint8)
@@ -119,106 +119,106 @@ def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) ->
 
 
 def generate_all_textures():
-    print("[1/4] Generating HD (1536x1536) PBR Textures...")
-    S = 1536
+    print("[1/4] Generating HD (1408x1408) PBR Textures...")
+    S = 1408
     n_base = fbm_noise(S)
-    n_fine = fbm_noise(S, octaves=(24, 96, 384, 768), weights=(0.2, 0.3, 0.3, 0.2))
+    n_fine = fbm_noise(S, octaves=(22, 88, 352, 704), weights=(0.2, 0.3, 0.3, 0.2))
 
     asphalt = np.zeros((S, S, 3), dtype=np.float32)
     asphalt[..., 0] = 36 + n_base * 22 + n_fine * 14
     asphalt[..., 1] = 38 + n_base * 22 + n_fine * 14
     asphalt[..., 2] = 43 + n_base * 24 + n_fine * 15
-    save_rgb_png(asphalt, os.path.join(TEXTURES_DIR, "asphalt_albedo.png"), micro_grain=20)
-    save_rgb_png(generate_normal_from_height(n_fine, 4.0), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=10)
+    save_rgb_png(asphalt, os.path.join(TEXTURES_DIR, "asphalt_albedo.png"), micro_grain=10)
+    save_rgb_png(generate_normal_from_height(n_fine, 4.0), os.path.join(TEXTURES_DIR, "asphalt_normal.png"), micro_grain=6)
 
     rough = np.repeat(((0.35 + n_base * 0.45) * 255.0)[..., None], 3, axis=-1)
-    save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"), micro_grain=14)
+    save_rgb_png(rough, os.path.join(TEXTURES_DIR, "asphalt_roughness.png"), micro_grain=8)
 
     road_1w2l = asphalt.copy()
-    road_1w2l[:, 30:56] = [235, 235, 230]
-    road_1w2l[:, S - 56:S - 30] = [235, 235, 230]
-    for y in range(0, S, 192):
-        road_1w2l[y:y + 96, S // 2 - 12:S // 2 + 12] = [245, 245, 240]
-    save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"), micro_grain=16)
+    road_1w2l[:, 28:52] = [235, 235, 230]
+    road_1w2l[:, S - 52:S - 28] = [235, 235, 230]
+    for y in range(0, S, 176):
+        road_1w2l[y:y + 88, S // 2 - 11:S // 2 + 11] = [245, 245, 240]
+    save_rgb_png(road_1w2l, os.path.join(TEXTURES_DIR, "road_1way_2lane_albedo.png"), micro_grain=8)
 
     road_2w4l = asphalt.copy()
-    road_2w4l[:, 28:52] = [235, 235, 230]
-    road_2w4l[:, S - 52:S - 28] = [235, 235, 230]
-    road_2w4l[:, S // 2 - 20:S // 2 - 6] = [240, 185, 30]
-    road_2w4l[:, S // 2 + 6:S // 2 + 20] = [240, 185, 30]
-    for y in range(0, S, 192):
-        road_2w4l[y:y + 96, S // 4 - 9:S // 4 + 9] = [240, 240, 235]
-        road_2w4l[y:y + 96, (3 * S) // 4 - 9:(3 * S) // 4 + 9] = [240, 240, 235]
-    save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"), micro_grain=16)
+    road_2w4l[:, 26:48] = [235, 235, 230]
+    road_2w4l[:, S - 48:S - 26] = [235, 235, 230]
+    road_2w4l[:, S // 2 - 18:S // 2 - 5] = [240, 185, 30]
+    road_2w4l[:, S // 2 + 5:S // 2 + 18] = [240, 185, 30]
+    for y in range(0, S, 176):
+        road_2w4l[y:y + 88, S // 4 - 8:S // 4 + 8] = [240, 240, 235]
+        road_2w4l[y:y + 88, (3 * S) // 4 - 8:(3 * S) // 4 + 8] = [240, 240, 235]
+    save_rgb_png(road_2w4l, os.path.join(TEXTURES_DIR, "road_2way_4lane_albedo.png"), micro_grain=8)
 
     yy, xx = np.mgrid[0:S, 0:S]
-    tile_x = (xx // 48) % 2
-    tile_y = (yy // 48) % 2
+    tile_x = (xx // 44) % 2
+    tile_y = (yy // 44) % 2
     checker = (tile_x ^ tile_y).astype(np.float32)
-    grout = ((xx % 48 < 3) | (yy % 48 < 3)).astype(np.float32)
+    grout = ((xx % 44 < 3) | (yy % 44 < 3)).astype(np.float32)
     paving = np.zeros((S, S, 3), dtype=np.float32)
     paving[..., 0] = np.where(checker > 0, 168, 128) + n_fine * 24 - grout * 55
     paving[..., 1] = np.where(checker > 0, 82, 126) + n_fine * 20 - grout * 55
     paving[..., 2] = np.where(checker > 0, 74, 124) + n_fine * 20 - grout * 55
-    save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"), micro_grain=18)
+    save_rgb_png(paving, os.path.join(TEXTURES_DIR, "sidewalk_paving_albedo.png"), micro_grain=9)
     save_rgb_png(generate_normal_from_height(1.0 - grout * 0.6 + n_fine * 0.3, 4.5),
-                 os.path.join(TEXTURES_DIR, "sidewalk_normal.png"), micro_grain=10)
+                 os.path.join(TEXTURES_DIR, "sidewalk_normal.png"), micro_grain=6)
 
     bikelane = np.zeros((S, S, 3), dtype=np.float32)
     bikelane[..., 0] = 34 + n_fine * 20
     bikelane[..., 1] = 138 + n_fine * 28
     bikelane[..., 2] = 74 + n_fine * 20
-    bikelane[:, 18:40] = [245, 245, 245]
-    bikelane[:, S - 40:S - 18] = [245, 245, 245]
-    save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"), micro_grain=16)
+    bikelane[:, 16:36] = [245, 245, 245]
+    bikelane[:, S - 36:S - 16] = [245, 245, 245]
+    save_rgb_png(bikelane, os.path.join(TEXTURES_DIR, "bikelane_albedo.png"), micro_grain=8)
 
     grass = np.zeros((S, S, 3), dtype=np.float32)
     grass[..., 0] = 44 + n_base * 34 + n_fine * 18
     grass[..., 1] = 108 + n_base * 48 + n_fine * 26
     grass[..., 2] = 36 + n_base * 22 + n_fine * 14
-    save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"), micro_grain=22)
-    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=12)
+    save_rgb_png(grass, os.path.join(TEXTURES_DIR, "grass_nusantara_albedo.png"), micro_grain=10)
+    save_rgb_png(generate_normal_from_height(n_fine, 3.8), os.path.join(TEXTURES_DIR, "grass_normal.png"), micro_grain=6)
 
     soil = np.zeros((S, S, 3), dtype=np.float32)
     soil[..., 0] = 104 + n_base * 36 + n_fine * 20
     soil[..., 1] = 74 + n_base * 28 + n_fine * 16
     soil[..., 2] = 52 + n_base * 20 + n_fine * 12
-    save_rgb_png(soil, os.path.join(TEXTURES_DIR, "soil_mountain_albedo.png"), micro_grain=22)
-    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "soil_normal.png"), micro_grain=12)
+    save_rgb_png(soil, os.path.join(TEXTURES_DIR, "soil_mountain_albedo.png"), micro_grain=10)
+    save_rgb_png(generate_normal_from_height(n_fine, 4.2), os.path.join(TEXTURES_DIR, "soil_normal.png"), micro_grain=6)
 
     pinus = np.stack([24 + n_fine * 25, 76 + n_base * 40 + n_fine * 24, 34 + n_fine * 20], axis=-1)
-    save_rgb_png(pinus, os.path.join(TEXTURES_DIR, "foliage_pinus_albedo.png"), micro_grain=24)
+    save_rgb_png(pinus, os.path.join(TEXTURES_DIR, "foliage_pinus_albedo.png"), micro_grain=10)
 
     trembesi = np.stack([42 + n_fine * 30, 118 + n_base * 45 + n_fine * 25, 44 + n_fine * 22], axis=-1)
-    save_rgb_png(trembesi, os.path.join(TEXTURES_DIR, "foliage_trembesi_albedo.png"), micro_grain=24)
+    save_rgb_png(trembesi, os.path.join(TEXTURES_DIR, "foliage_trembesi_albedo.png"), micro_grain=10)
 
     blossom_mask = (n_fine > 0.56).astype(np.float32)
     tabebuya = np.zeros((S, S, 3), dtype=np.float32)
     tabebuya[..., 0] = np.where(blossom_mask > 0, 242, 48) + n_fine * 18
     tabebuya[..., 1] = np.where(blossom_mask > 0, 156, 114) + n_fine * 18
     tabebuya[..., 2] = np.where(blossom_mask > 0, 196, 48) + n_fine * 18
-    save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"), micro_grain=22)
+    save_rgb_png(tabebuya, os.path.join(TEXTURES_DIR, "foliage_tabebuya_albedo.png"), micro_grain=10)
 
-    win_x = (xx % 96 >= 18) & (xx % 96 <= 78)
-    win_y = (yy % 96 >= 20) & (yy % 96 <= 76)
+    win_x = (xx % 88 >= 16) & (xx % 88 <= 72)
+    win_y = (yy % 88 >= 18) & (yy % 88 <= 70)
     is_window = win_x & win_y
-    cell_id = (xx // 96) * 31 + (yy // 96) * 17
+    cell_id = (xx // 88) * 31 + (yy // 88) * 17
     lit_mask = is_window & ((cell_id % 5) != 0)
 
     facade_day = np.zeros((S, S, 3), dtype=np.float32)
     facade_day[..., 0] = np.where(is_window, 55, 198 + n_base * 24)
     facade_day[..., 1] = np.where(is_window, 78, 194 + n_base * 24)
     facade_day[..., 2] = np.where(is_window, 105, 186 + n_base * 24)
-    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"), micro_grain=14)
+    save_rgb_png(facade_day, os.path.join(TEXTURES_DIR, "building_facade_day.png"), micro_grain=7)
 
     facade_night = np.zeros((S, S, 3), dtype=np.float32)
     warm_tone = (cell_id % 3)
     facade_night[..., 0] = np.where(lit_mask, 255, 8)
     facade_night[..., 1] = np.where(lit_mask, np.where(warm_tone == 0, 214, 185), 10)
     facade_night[..., 2] = np.where(lit_mask, np.where(warm_tone == 0, 128, 92), 18)
-    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=12)
+    save_rgb_png(facade_night, os.path.join(TEXTURES_DIR, "building_facade_night_emission.png"), micro_grain=6)
 
-    stripe = (xx // 192) % 5
+    stripe = (xx // 176) % 5
     palette = np.array([
         [235, 68, 74],
         [248, 196, 42],
@@ -228,14 +228,14 @@ def generate_all_textures():
     ], dtype=np.float32)
     kampung = palette[stripe] + (n_fine[..., None] - 0.5) * 28.0
     kampung[is_window] = [42, 48, 58]
-    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=16)
+    save_rgb_png(kampung, os.path.join(TEXTURES_DIR, "kampung_warnawarni_albedo.png"), micro_grain=8)
 
     indo = np.full((S, S, 3), [242, 244, 248], dtype=np.float32)
-    indo[0:165, :] = [218, 37, 29]
-    indo[165:255, :] = [0, 91, 170]
-    indo[255:310, :] = [255, 204, 0]
-    indo[525:1390, 135:1400] = [48, 76, 108]
-    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=14)
+    indo[0:150, :] = [218, 37, 29]
+    indo[150:235, :] = [0, 91, 170]
+    indo[235:285, :] = [255, 204, 0]
+    indo[480:1270, 125:1280] = [48, 76, 108]
+    save_rgb_png(indo, os.path.join(TEXTURES_DIR, "indomaret_facade_albedo.png"), micro_grain=7)
 
 
 # ==============================================================================
