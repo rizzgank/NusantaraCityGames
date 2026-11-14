@@ -11,9 +11,16 @@ enum CityMapType: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .malang: return "Malang Raya (Pegunungan)"
-        case .surabaya: return "Kota Surabaya (Pesisir)"
-        case .jakarta: return "DKI Jakarta (Metropolitan)"
+        case .malang: return "Malang Raya"
+        case .surabaya: return "Kota Surabaya"
+        case .jakarta: return "DKI Jakarta"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .malang: return "Pegunungan Arjuno & Sungai Brantas"
+        case .surabaya: return "Pesisir Selat Madura & Kali Mas"
+        case .jakarta: return "Teluk Utara & Sungai Ciliwung"
         }
     }
 }
@@ -21,18 +28,20 @@ enum CityMapType: String, CaseIterable, Identifiable, Codable {
 enum PlayMode: String, CaseIterable, Identifiable, Codable {
     case real, sandbox
     var id: String { rawValue }
-    var title: String { self == .real ? "Mode Real (APBD & Pajak)" : "Mode Sandbox (Tanpa Batas)" }
+    var title: String { self == .real ? "Mode Real (APBD)" : "Mode Sandbox" }
+    var subtitle: String { self == .real ? "Modal Rp 150 M + Pajak Riil" : "Dana Tak Terbatas" }
 }
 
 enum BuildCategory: String, CaseIterable, Identifiable {
-    case roads, zones, facilities, gebrakans
+    case roads, zones, facilities, gebrakans, bulldoze
     var id: String { rawValue }
     var title: String {
         switch self {
         case .roads: return "Jalan & Alun-Alun"
-        case .zones: return "Zona Hunian/Kom"
-        case .facilities: return "Fasilitas Publik"
+        case .zones: return "Zona Kota"
+        case .facilities: return "Sekolah & Publik"
         case .gebrakans: return "Menu Gebrakan"
+        case .bulldoze: return "Hapus"
         }
     }
     var icon: String {
@@ -41,6 +50,7 @@ enum BuildCategory: String, CaseIterable, Identifiable {
         case .zones: return "square.grid.2x2.fill"
         case .facilities: return "building.2.fill"
         case .gebrakans: return "bolt.fill"
+        case .bulldoze: return "trash.fill"
         }
     }
 }
@@ -72,10 +82,10 @@ enum ZoneKind: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .residential: return "Area Hunian (Rumah)"
-        case .commercial: return "Area Komersial (Ruko/Mini market)"
-        case .industrial: return "Area Industri"
-        case .park: return "Taman Hijau"
+        case .residential: return "Hunian (5 Jiwa/Rumah)"
+        case .commercial: return "Komersial & Ruko"
+        case .industrial: return "Kawasan Industri"
+        case .park: return "Taman Kota"
         }
     }
     var costIDR: Int64 {
@@ -88,7 +98,7 @@ enum ZoneKind: String, CaseIterable, Identifiable, Codable {
     }
     var basePopulation: Int {
         switch self {
-        case .residential: return 5 // Logis: 1 kapling rumah dihuni 5 jiwa
+        case .residential: return 5
         case .commercial: return 2
         case .industrial: return 0
         case .park: return 0
@@ -105,51 +115,60 @@ enum ZoneKind: String, CaseIterable, Identifiable, Codable {
 }
 
 enum FacilityKind: String, CaseIterable, Identifiable, Codable {
-    case balaiKota, sdNegeri, smpUnggulan, smaKandungan, universitas, rsud, polda, pemadam
+    case balaiKota, sdNegeri, smpUnggulan, smaKejuruan, universitas, rsud, kantorPolisi, pemadam
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .balaiKota: return "Balai Kota (Town Hall)"
-        case .sdNegeri: return "SD Negeri Nusantara"
+        case .balaiKota: return "Balai Kota"
+        case .sdNegeri: return "SD Negeri"
         case .smpUnggulan: return "SMP Unggulan"
-        case .smaKandungan: return "SMA / SMK Nusantara"
-        case .universitas: return "Universitas Kampus Utama"
-        case .rsud: return "Rumah Sakit (RSUD)"
-        case .polda: return "Kantor Polisi"
-        case .pemadam: return "Pos Pemadam Kebakaran"
+        case .smaKejuruan: return "SMA / SMK"
+        case .universitas: return "Universitas"
+        case .rsud: return "RSUD (Kesehatan)"
+        case .kantorPolisi: return "Kantor Polisi"
+        case .pemadam: return "Pemadam Kebakaran"
         }
     }
     var costIDR: Int64 {
         switch self {
-        case .balaiKota: return 10_000_000_000
-        case .sdNegeri: return 1_500_000_000
-        case .smpUnggulan: return 2_500_000_000
-        case .smaKandungan: return 4_000_000_000
-        case .universitas: return 25_000_000_000
-        case .rsud: return 8_000_000_000
-        case .polda: return 3_000_000_000
+        case .balaiKota: return 8_000_000_000
+        case .sdNegeri: return 1_200_000_000
+        case .smpUnggulan: return 2_000_000_000
+        case .smaKejuruan: return 3_200_000_000
+        case .universitas: return 18_000_000_000
+        case .rsud: return 6_000_000_000
+        case .kantorPolisi: return 2_500_000_000
         case .pemadam: return 2_000_000_000
+        }
+    }
+    var educationScore: Int {
+        switch self {
+        case .sdNegeri: return 15
+        case .smpUnggulan: return 20
+        case .smaKejuruan: return 25
+        case .universitas: return 40
+        default: return 0
         }
     }
 }
 
-enum GebrakanKind: String, CaseIterable, Identifiable {
-    case jumatBersih, digitalUmkm, subsidiTrans, beasiswa
+enum GebrakanKind: String, CaseIterable, Identifiable, Codable {
+    case jumatBersih, digitalUmkm, subsidiTrans, beasiswaKampus
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .jumatBersih: return "Gebrakan Jumat Bersih (+10% Bahagia)"
-        case .digitalUmkm: return "Digitalisasi UMKM (+25% Pajak Toko)"
-        case .subsidiTrans: return "Subsidi Transportasi Publik"
-        case .beasiswa: return "Program Beasiswa Kampus Utama"
+        case .jumatBersih: return "Jumat Bersih (+10% Bahagia)"
+        case .digitalUmkm: return "Digitalisasi UMKM (+25% Pajak)"
+        case .subsidiTrans: return "Subsidi Transportasi (-Macet)"
+        case .beasiswaKampus: return "Beasiswa Nusantara (+Riset)"
         }
     }
     var costIDR: Int64 {
         switch self {
-        case .jumatBersih: return 5_000_000_000
-        case .digitalUmkm: return 12_000_000_000
-        case .subsidiTrans: return 8_000_000_000
-        case .beasiswa: return 15_000_000_000
+        case .jumatBersih: return 3_000_000_000
+        case .digitalUmkm: return 8_000_000_000
+        case .subsidiTrans: return 6_000_000_000
+        case .beasiswaKampus: return 10_000_000_000
         }
     }
 }
@@ -180,10 +199,12 @@ struct CitySaveSnapshot: Codable {
     let roads: [RoadTile]
     let zones: [ZoneTile]
     let facilities: [FacilityTile]
+    let activeGebrakans: [GebrakanKind]
 }
 
 enum IDRFormat {
     static func string(_ value: Int64) -> String {
+        if value >= 1_000_000_000_000 { return "Tak Terbatas" }
         let absVal = abs(value)
         let sign = value < 0 ? "-" : ""
         if absVal >= 1_000_000_000 {
