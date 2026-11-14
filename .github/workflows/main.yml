@@ -24,9 +24,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install XcodeGen & Image/Audio Libraries
+      - name: Install XcodeGen, ldid & Image/Audio Libraries
         run: |
-          brew install xcodegen
+          brew install xcodegen ldid
           python3 -m pip install --upgrade pip
           pip install pillow numpy
 
@@ -39,7 +39,7 @@ jobs:
         run: |
           xcodegen generate
 
-      - name: Build Ad-Hoc Signed Release App for iPhone
+      - name: Build Unsigned Release App for iPhone
         run: |
           xcodebuild \
             -project CityBuildingNusantara.xcodeproj \
@@ -47,18 +47,17 @@ jobs:
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Package Payload into CityBuildingNusantara.ipa
+      - name: Sign with ldid & Package CityBuildingNusantara.ipa
         run: |
           rm -rf Payload CityBuildingNusantara.ipa
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/CityBuildingNusantara.app Payload/
-          codesign -dvvv Payload/CityBuildingNusantara.app || true
+          ldid -S Payload/CityBuildingNusantara.app/CityBuildingNusantara
           zip -r -y CityBuildingNusantara.ipa Payload
           ls -lh CityBuildingNusantara.ipa
 
