@@ -1,4 +1,4 @@
-name: Build City Building Nusantara IPA
+﻿name: Build City Building Nusantara IPA
 
 on:
   push:
@@ -16,24 +16,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python & Asset Dependencies
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
-      - name: Install XcodeGen & Image/Audio Libraries
+      - name: Prepare GameAssets Bundle
         run: |
-          brew install xcodegen
-          python3 -m pip install --upgrade pip
-          pip install pillow numpy
-
-      - name: Generate 3D Models, PBR Textures, Maps & Audio
-        run: |
-          python3 Scripts/generate_assets.py
+          rm -rf Resources GameAssets Assets.xcassets
+          mkdir -p GameAssets
+          echo '{"studio":"Rizzi Games","project":"City Building Nusantara","version":"1.0"}' > GameAssets/manifest.json
 
       - name: Generate Xcode Project
-        run: |
-          xcodegen generate
+        run: xcodegen generate
 
       - name: Build Unsigned iOS App
         run: |
