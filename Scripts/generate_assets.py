@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Rizzi Games (RG) - City Building : Nusantara Project
-Fast-Download Build (~12MB) Generator for AppIcon, 3D Models, PBR Textures,
+iOS-Safe Asset Generator (GameAssets/) for 3D Models, PBR Textures,
 Topographic Maps, and Stereo Audio.
 """
 
@@ -12,24 +12,22 @@ import wave
 import numpy as np
 from PIL import Image, ImageDraw
 
-BASE_DIR = "Resources"
+BASE_DIR = "GameAssets"
 MODELS_DIR = os.path.join(BASE_DIR, "Models")
 TEXTURES_DIR = os.path.join(BASE_DIR, "Textures")
 MAPS_DIR = os.path.join(BASE_DIR, "Maps")
 AUDIO_DIR = os.path.join(BASE_DIR, "Audio")
-XCASSETS_DIR = "Assets.xcassets"
-APPICON_DIR = os.path.join(XCASSETS_DIR, "AppIcon.appiconset")
 
 RNG = np.random.default_rng(20261114)
 
 
 def ensure_dirs():
-    for d in [BASE_DIR, MODELS_DIR, TEXTURES_DIR, MAPS_DIR, AUDIO_DIR, XCASSETS_DIR, APPICON_DIR]:
+    for d in [BASE_DIR, MODELS_DIR, TEXTURES_DIR, MAPS_DIR, AUDIO_DIR]:
         os.makedirs(d, exist_ok=True)
 
 
-def generate_app_icon():
-    print("[0/4] Generating iOS AppIcon.appiconset...")
+def generate_app_icon_preview():
+    print("[0/4] Generating App Icon PNG (GameAssets/app_icon.png)...")
     size = 1024
     img = Image.new("RGB", (size, size), (14, 24, 48))
     draw = ImageDraw.Draw(img)
@@ -61,30 +59,7 @@ def generate_app_icon():
 
     draw.rectangle([0, 860, 1024, 1024], fill=(32, 38, 46))
     draw.rectangle([0, 928, 1024, 944], fill=(245, 195, 45))
-
-    icon_specs = [
-        (40, "icon_40.png", "20x20", "2x"),
-        (60, "icon_60.png", "20x20", "3x"),
-        (58, "icon_58.png", "29x29", "2x"),
-        (87, "icon_87.png", "29x29", "3x"),
-        (80, "icon_80.png", "40x40", "2x"),
-        (120, "icon_120_40.png", "40x40", "3x"),
-        (120, "icon_120.png", "60x60", "2x"),
-        (180, "icon_180.png", "60x60", "3x"),
-        (1024, "icon_1024.png", "1024x1024", "1x"),
-    ]
-    images_json = []
-    for px_size, fname, pt_size, scale in icon_specs:
-        resized = img.resize((px_size, px_size), Image.Resampling.LANCZOS)
-        resized.save(os.path.join(APPICON_DIR, fname), format="PNG")
-        idiom = "ios-marketing" if pt_size == "1024x1024" else "iphone"
-        images_json.append({"filename": fname, "idiom": idiom, "scale": scale, "size": pt_size})
-
-    with open(os.path.join(XCASSETS_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
-        json.dump({"info": {"author": "xcode", "version": 1}}, fp, indent=2)
-
-    with open(os.path.join(APPICON_DIR, "Contents.json"), "w", encoding="utf-8") as fp:
-        json.dump({"images": images_json, "info": {"author": "xcode", "version": 1}}, fp, indent=2)
+    img.save(os.path.join(BASE_DIR, "app_icon.png"), format="PNG")
 
 
 def fbm_noise(size: int, octaves=(8, 32, 128), weights=(0.50, 0.30, 0.20)) -> np.ndarray:
@@ -116,7 +91,7 @@ def generate_normal_from_height(height_2d: np.ndarray, strength: float = 3.5) ->
 
 
 def generate_all_textures():
-    print("[1/4] Generating PBR Textures (512x512 Fast-Test)...")
+    print("[1/4] Generating PBR Textures...")
     S = 512
     n_base = fbm_noise(S)
     n_fine = fbm_noise(S, octaves=(16, 64, 256), weights=(0.3, 0.4, 0.3))
@@ -603,7 +578,7 @@ def write_manifest():
 
 if __name__ == "__main__":
     ensure_dirs()
-    generate_app_icon()
+    generate_app_icon_preview()
     generate_all_textures()
     generate_all_models()
     generate_nusantara_maps()

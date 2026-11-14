@@ -199,7 +199,7 @@ final class City3DEngineController: ObservableObject {
         let size = gridDimension
         heightGrid = Array(repeating: Array(repeating: 0.0, count: size), count: size)
 
-        if let img = loadTextureImage(named: map.heightmapResourceName, subdirectory: "Resources/Maps"),
+        if let img = loadTextureImage(named: map.heightmapResourceName, subdirectory: "GameAssets/Maps"),
            let cgImg = img.cgImage,
            let provider = cgImg.dataProvider,
            let rawData = provider.data,
@@ -300,14 +300,14 @@ final class City3DEngineController: ObservableObject {
 
         let mat = SCNMaterial()
         mat.lightingModel = .physicallyBased
-        if let grassTex = loadTextureImage(named: "grass_nusantara_albedo", subdirectory: "Resources/Textures") {
+        if let grassTex = loadTextureImage(named: "grass_nusantara_albedo", subdirectory: "GameAssets/Textures") {
             mat.diffuse.contents = grassTex
             mat.diffuse.wrapS = .repeat
             mat.diffuse.wrapT = .repeat
         } else {
             mat.diffuse.contents = UIColor(red: 0.24, green: 0.52, blue: 0.22, alpha: 1.0)
         }
-        if let grassNorm = loadTextureImage(named: "grass_normal", subdirectory: "Resources/Textures") {
+        if let grassNorm = loadTextureImage(named: "grass_normal", subdirectory: "GameAssets/Textures") {
             mat.normal.contents = grassNorm
             mat.normal.wrapS = .repeat
             mat.normal.wrapT = .repeat
@@ -530,12 +530,12 @@ final class City3DEngineController: ObservableObject {
         let slab = SCNBox(width: CGFloat(cellSize), height: 0.14, length: CGFloat(cellSize), chamferRadius: 0.02)
         let mat = SCNMaterial()
         mat.lightingModel = .physicallyBased
-        if let tex = loadTextureImage(named: road.roadType.albedoTextureName, subdirectory: "Resources/Textures") {
+        if let tex = loadTextureImage(named: road.roadType.albedoTextureName, subdirectory: "GameAssets/Textures") {
             mat.diffuse.contents = tex
         } else {
             mat.diffuse.contents = UIColor.darkGray
         }
-        if let norm = loadTextureImage(named: "asphalt_normal", subdirectory: "Resources/Textures") {
+        if let norm = loadTextureImage(named: "asphalt_normal", subdirectory: "GameAssets/Textures") {
             mat.normal.contents = norm
         }
         mat.roughness.contents = isNight ? 0.32 : 0.75 // Kilau aspal malam hari
@@ -604,7 +604,7 @@ final class City3DEngineController: ObservableObject {
                 existing.enumerateChildNodes { child, _ in
                     if let mat = child.geometry?.firstMaterial {
                         if nightGlowActive,
-                           let emissionTex = loadTextureImage(named: "building_facade_night_emission", subdirectory: "Resources/Textures") {
+                           let emissionTex = loadTextureImage(named: "building_facade_night_emission", subdirectory: "GameAssets/Textures") {
                             mat.emission.contents = emissionTex
                             mat.emission.intensity = 1.25
                         } else {
@@ -624,8 +624,8 @@ final class City3DEngineController: ObservableObject {
         modelNode.position = SCNVector3(wx, wy, wz)
         modelNode.eulerAngles.y = structure.rotationY
 
-        let dayTex = loadTextureImage(named: structure.structureType.albedoTextureName, subdirectory: "Resources/Textures")
-        let nightTex = loadTextureImage(named: "building_facade_night_emission", subdirectory: "Resources/Textures")
+        let dayTex = loadTextureImage(named: structure.structureType.albedoTextureName, subdirectory: "GameAssets/Textures")
+        let nightTex = loadTextureImage(named: "building_facade_night_emission", subdirectory: "GameAssets/Textures")
 
         modelNode.enumerateChildNodes { child, _ in
             if let mat = child.geometry?.firstMaterial {
@@ -652,7 +652,7 @@ final class City3DEngineController: ObservableObject {
 
     private func createDetailedTreeNode(species: TreeSpecies, withFallingLeaves: Bool) -> SCNNode {
         let node = loadObjModel(named: species.rawValue, scale: 0.65)
-        let leafTex = loadTextureImage(named: species.foliageTextureName, subdirectory: "Resources/Textures")
+        let leafTex = loadTextureImage(named: species.foliageTextureName, subdirectory: "GameAssets/Textures")
 
         node.enumerateChildNodes { child, _ in
             if let mat = child.geometry?.firstMaterial {
@@ -839,7 +839,7 @@ final class City3DEngineController: ObservableObject {
         guard targetTrack != currentAudioTrack else { return }
         currentAudioTrack = targetTrack
 
-        if let url = locateResourceURL(name: targetTrack, ext: "wav", subdirectory: "Resources/Audio") {
+        if let url = locateResourceURL(name: targetTrack, ext: "wav", subdirectory: "GameAssets/Audio") {
             do {
                 let player = try AVAudioPlayer(contentsOf: url)
                 player.numberOfLoops = -1
@@ -854,7 +854,7 @@ final class City3DEngineController: ObservableObject {
     }
 
     func playBuildSFX(volume: Double = 0.8) {
-        guard let url = locateResourceURL(name: "build_construct_sfx", ext: "wav", subdirectory: "Resources/Audio") else {
+        guard let url = locateResourceURL(name: "build_construct_sfx", ext: "wav", subdirectory: "GameAssets/Audio") else {
             return
         }
         do {
@@ -895,7 +895,7 @@ final class City3DEngineController: ObservableObject {
             return cloned
         }
 
-        if let url = locateResourceURL(name: name, ext: "obj", subdirectory: "Resources/Models") {
+        if let url = locateResourceURL(name: name, ext: "obj", subdirectory: "GameAssets/Models") {
             let asset = MDLAsset(url: url)
             if asset.count > 0 {
                 let container = SCNNode()
